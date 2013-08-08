@@ -11,10 +11,10 @@ macro_rules! printf(
 )
 
 enum Op {
-	Add(~Expr,~Expr),
-	Sub(~Expr,~Expr),
-	Mul(~Expr,~Expr),
-	Div(~Expr,~Expr),
+	Add(@Expr,@Expr),
+	Sub(@Expr,@Expr),
+	Mul(@Expr,@Expr),
+	Div(@Expr,@Expr),
 	Val
 }
 
@@ -56,10 +56,10 @@ macro_rules! bin_iter_bytes(
 impl IterBytes for Expr {
 	fn iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
 		match self.op {
-			Add(ref left, ref right) => bin_iter_bytes!('+'),
-			Sub(ref left, ref right) => bin_iter_bytes!('-'),
-			Mul(ref left, ref right) => bin_iter_bytes!('*'),
-			Div(ref left, ref right) => bin_iter_bytes!('/'),
+			Add(left, right) => bin_iter_bytes!('+'),
+			Sub(left, right) => bin_iter_bytes!('-'),
+			Mul(left, right) => bin_iter_bytes!('*'),
+			Div(left, right) => bin_iter_bytes!('/'),
 			Val => self.value.iter_bytes(lsb0,f)
 		}
 	}
@@ -68,10 +68,10 @@ impl IterBytes for Expr {
 impl Clone for Op {
 	fn clone(&self) -> Op {
 		match *self {
-			Add(ref left, ref right) => Add(left.clone(), right.clone()),
-			Sub(ref left, ref right) => Sub(left.clone(), right.clone()),
-			Mul(ref left, ref right) => Mul(left.clone(), right.clone()),
-			Div(ref left, ref right) => Div(left.clone(), right.clone()),
+			Add(left, right) => Add(left, right),
+			Sub(left, right) => Sub(left, right),
+			Mul(left, right) => Mul(left, right),
+			Div(left, right) => Div(left, right),
 			Val => Val
 		}
 	}
@@ -86,20 +86,20 @@ impl Clone for Expr {
 impl Eq for Expr {
 	fn eq(&self, other: &Expr) -> bool {
 		match self.op {
-			Add(ref left, ref right) => match other.op {
-				Add(ref oleft, ref oright) => left == oleft && right == oright,
+			Add(left, right) => match other.op {
+				Add(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
-			Sub(ref left, ref right) => match other.op {
-				Sub(ref oleft, ref oright) => left == oleft && right == oright,
+			Sub(left, right) => match other.op {
+				Sub(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
-			Mul(ref left, ref right) => match other.op {
-				Mul(ref oleft, ref oright) => left == oleft && right == oright,
+			Mul(left, right) => match other.op {
+				Mul(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
-			Div(ref left, ref right) => match other.op {
-				Div(ref oleft, ref oright) => left == oleft && right == oright,
+			Div(left, right) => match other.op {
+				Div(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
 			Val => match other.op {
@@ -114,19 +114,19 @@ impl ToStr for Expr {
 	fn to_str(&self) -> ~str {
 		let p = self.precedence();
 		match self.op {
-			Add(ref left, ref right) => fmt!("%s + %s", left.to_str_under(p), right.to_str_under(p)),
-			Sub(ref left, ref right) => fmt!("%s - %s", left.to_str_under(p), right.to_str_under(p)),
-			Mul(ref left, ref right) => fmt!("%s * %s", left.to_str_under(p), right.to_str_under(p)),
-			Div(ref left, ref right) => fmt!("%s / %s", left.to_str_under(p), right.to_str_under(p)),
+			Add(left, right) => fmt!("%s + %s", left.to_str_under(p), right.to_str_under(p)),
+			Sub(left, right) => fmt!("%s - %s", left.to_str_under(p), right.to_str_under(p)),
+			Mul(left, right) => fmt!("%s * %s", left.to_str_under(p), right.to_str_under(p)),
+			Div(left, right) => fmt!("%s / %s", left.to_str_under(p), right.to_str_under(p)),
 			Val => self.value.to_str()
 		}
 	}
 }
 
-fn val(value: uint, index: uint, numcnt: uint) -> ~Expr {
+fn val(value: uint, index: uint, numcnt: uint) -> @Expr {
 	let mut used = std::vec::from_elem(numcnt, 0u);
 	used[index] = 1;
-	~Expr { op: Val, value: value, used: used }
+	@Expr { op: Val, value: value, used: used }
 }
 
 fn join_usage(left: &Expr, right: &Expr) -> ~[uint] {
@@ -140,28 +140,28 @@ fn join_usage(left: &Expr, right: &Expr) -> ~[uint] {
 	return used;
 }
 
-fn add(left: ~Expr, right: ~Expr) -> ~Expr {
+fn add(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value + right.value;
-	~Expr { op: Add(left, right), value: value, used: used }
+	@Expr { op: Add(left, right), value: value, used: used }
 }
 
-fn sub(left: ~Expr, right: ~Expr) -> ~Expr {
+fn sub(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value - right.value;
-	~Expr { op: Sub(left, right), value: value, used: used }
+	@Expr { op: Sub(left, right), value: value, used: used }
 }
 
-fn mul(left: ~Expr, right: ~Expr) -> ~Expr {
+fn mul(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value * right.value;
-	~Expr { op: Mul(left, right), value: value, used: used }
+	@Expr { op: Mul(left, right), value: value, used: used }
 }
 
-fn div(left: ~Expr, right: ~Expr) -> ~Expr {
+fn div(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value / right.value;
-	~Expr { op: Div(left, right), value: value, used: used }
+	@Expr { op: Div(left, right), value: value, used: used }
 }
 
 macro_rules! yield(
@@ -183,7 +183,7 @@ fn uniq(xs: &[uint]) -> ~[uint] {
 }
 
 // TODO: reduce the awefully high number of clones using @ thruout the program
-fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
+fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 	let mut uniq_nums = uniq(numbers);
 	quick_sort3(uniq_nums);
 	let numcnt = uniq_nums.len();
@@ -193,7 +193,7 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
 	for (i, numref) in uniq_nums.iter().enumerate() {
 		let num = *numref;
 		let expr = val(num,i,numcnt);
-		uniq_exprs.insert(expr.clone());
+		uniq_exprs.insert(expr);
 		exprs.push(expr);
 		avail.push(numbers.iter().count(|x| { *x == num }));
 	}
@@ -208,8 +208,8 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
 	let mut upper = numcnt;
 	while lower < upper {
 		if (!combinations_slice(lower, upper, |a, b| {
-			let aexpr = exprs[a].clone();
-			let bexpr = exprs[b].clone();
+			let aexpr = exprs[a];
+			let bexpr = exprs[b];
 			let mut used = std::vec::from_elem(numcnt, 0u);
 			let mut fits = true;
 			let mut ok   = true;
@@ -234,7 +234,7 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
 				ok = make(aexpr, bexpr, |expr| {
 					let mut ok = true;
 					if !uniq_exprs.contains(&expr) {
-						uniq_exprs.insert(expr.clone());
+						uniq_exprs.insert(expr);
 						if expr.value == target {
 							ok = f(expr);
 						}
@@ -315,29 +315,29 @@ fn combinations_slice(lower: uint, upper: uint, f: &fn(uint,uint) -> bool) -> bo
 	return true;
 }
 
-fn make(a: &Expr, b: &Expr, f: &fn(~Expr) -> bool) -> bool {
-	yield!(add(~a.clone(),~b.clone()));
+fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
+	yield!(add(a,b));
 
 	if a.value != 1 && b.value != 1 {
-		yield!(mul(~a.clone(),~b.clone()));
+		yield!(mul(a,b));
 	}
 
 	if a.value > b.value {
-		yield!(sub(~a.clone(),~b.clone()));
+		yield!(sub(a,b));
 
 		if b.value != 1 && a.value % b.value == 0 {
-			yield!(div(~a.clone(),~b.clone()));
+			yield!(div(a,b));
 		}
 	}
 	else if b.value > a.value {
-		yield!(sub(~b.clone(),~a.clone()));
+		yield!(sub(b,a));
 
 		if a.value != 1 && b.value % a.value == 0 {
-			yield!(div(~b.clone(),~a.clone()));
+			yield!(div(b,a));
 		}
 	}
 	else if b.value != 1 {
-		yield!(div(~a.clone(),~b.clone()));
+		yield!(div(a,b));
 	}
 
 	return true;
@@ -352,45 +352,8 @@ fn main() {
 	let numbers = args.slice(2,args.len()).map(|arg|
 		uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg)));
 
-/*
-	let n = 20;
-	let mut tbl = std::vec::from_elem(n, std::vec::from_elem(n, 0u));
-	let mut counter = 1;
-	combinations_slice(10, n, |x, y| {
-		tbl[y][x] = counter;
-		counter += 1;
-		true
-	});
-	let mut x = 0;
-	print("   ");
-	while x < n {
-		print(fmt!(" %3u", x+1));
-		x += 1;
-	}
-	print("\n");
-	let mut y = 0;
-	while y < n {
-		print(fmt!("%3u", y+1));
-		x = 0;
-		while x < n {
-			let v = tbl[y][x];
-			if (v == 0) {
-				print("    ");
-			}
-			else {
-				print(fmt!(" %3u", v));
-			}
-			x += 1;
-		}
-		print("\n");
-		y += 1;
-	}
-*/
-
-//	println(fmt!("%?", add(mul(val(2,0,6),val(3,1,6)),val(4,2,6)) == add(mul(val(2,3,6),val(3,4,6)),val(4,5,6))));
 	println(fmt!("target   = %u", target));
 	println(fmt!("numbers  = %s", numbers.map(|num| num.to_str()).connect(", ")));
-//	println(fmt!("solution = %s", solve(target, numbers).to_str()));
 
 	println("solutions:");
 	let mut i = 1;
@@ -399,7 +362,4 @@ fn main() {
 		i += 1;
 		true
 	});
-
-//	let expr = mul(add(div(val(9),val(3)),val(2)),sub(val(2),val(3)));
-//	println(fmt!("%s = %d", expr.to_str(), expr.val()));
 }
