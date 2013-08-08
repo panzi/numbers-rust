@@ -65,24 +65,6 @@ impl IterBytes for Expr {
 	}
 }
 
-impl Clone for Op {
-	fn clone(&self) -> Op {
-		match *self {
-			Add(left, right) => Add(left, right),
-			Sub(left, right) => Sub(left, right),
-			Mul(left, right) => Mul(left, right),
-			Div(left, right) => Div(left, right),
-			Val => Val
-		}
-	}
-}
-
-impl Clone for Expr {
-	fn clone(&self) -> Expr {
-		Expr { op: self.op.clone(), value: self.value, used: self.used.clone() }
-	}
-}
-
 impl Eq for Expr {
 	fn eq(&self, other: &Expr) -> bool {
 		match self.op {
@@ -105,7 +87,7 @@ impl Eq for Expr {
 			Val => match other.op {
 				Val => self.value == other.value,
 				_ => false
-			},
+			}
 		}
 	}
 }
@@ -182,7 +164,6 @@ fn uniq(xs: &[uint]) -> ~[uint] {
 	return ys;
 }
 
-// TODO: reduce the awefully high number of clones using @ thruout the program
 fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 	let mut uniq_nums = uniq(numbers);
 	quick_sort3(uniq_nums);
@@ -206,11 +187,11 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 
 	let mut lower = 0;
 	let mut upper = numcnt;
+	let mut used  = std::vec::from_elem(numcnt, 0u);
 	while lower < upper {
 		if (!combinations_slice(lower, upper, |a, b| {
 			let aexpr = exprs[a];
 			let bexpr = exprs[b];
-			let mut used = std::vec::from_elem(numcnt, 0u);
 			let mut fits = true;
 			let mut ok   = true;
 
@@ -252,34 +233,6 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 
 		lower = upper;
 		upper = exprs.len();
-	}
-
-	return true;
-}
-
-fn bounded_combinations(n: uint, f: &fn(uint,uint) -> bool) -> bool {
-	let mut i = 0;
-	while i < n {
-		let mut a = 0;
-		let mut b = i;
-		while b > a {
-			yield!(a, b);
-			b -= 1;
-			a += 1;
-		}
-		i += 1;
-	}
-
-	i = 1;
-	while i < n {
-		let mut a = i;
-		let mut b = n - 1;
-		while b > a {
-			yield!(a, b);
-			b -= 1;
-			a += 1;
-		}
-		i += 1;
 	}
 
 	return true;
@@ -349,11 +302,12 @@ fn main() {
 		fail!("not enough arguments");
 	}
 	let target = uint::from_str(args[1]).expect("target is not a number");
-	let numbers = args.slice(2,args.len()).map(|arg|
+	let mut numbers = args.slice(2,args.len()).map(|arg|
 		uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg)));
+	quick_sort3(numbers);
 
-	println(fmt!("target   = %u", target));
-	println(fmt!("numbers  = %s", numbers.map(|num| num.to_str()).connect(", ")));
+	println(fmt!("target  = %u", target));
+	println(fmt!("numbers = [%s]", numbers.map(|num| num.to_str()).connect(", ")));
 
 	println("solutions:");
 	let mut i = 1;
