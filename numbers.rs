@@ -1,6 +1,14 @@
+extern mod extra;
+
 use std::{uint,os};
 use std::hashmap::HashSet;
-use std::iterator::FromIterator;
+use extra::sort::quick_sort3;
+
+macro_rules! printf(
+	($fmt:expr, $($arg:expr),*) => (
+		print(fmt!($fmt, $($arg),*))
+	)
+)
 
 enum Op {
 	Add(~Expr,~Expr),
@@ -160,28 +168,34 @@ macro_rules! yield(
 	($($arg:expr),*) => (if !f($($arg),*) { return false; })
 )
 
-/*
-macro_rules! compr(
-    ($o:expr : $v:ident <- $i:expr $(,$p:expr)+) =>
-        ($i.$(filtered(|&$v| { $p })).*.map(|&$v| { $o }));
-    ($o:expr : $v:ident <- $i:expr) =>
-        ($i.map(|&$v| { $o }))
-)
-*/
+fn uniq(xs: &[uint]) -> ~[uint] {
+	let mut uniq_xs = HashSet::new();
+	let mut ys = ~[];
 
-fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
-	let mut uniq_nums = HashSet::new();
-	for num in numbers.iter() {
-		uniq_nums.insert(num);
+	for x in xs.iter() {
+		if !uniq_xs.contains(x) {
+			uniq_xs.insert(*x);
+			ys.push(*x);
+		}
 	}
-//	let uniq_nums = FromIterator::from_iterator::<HashSet<uint>>(numbers.iter());
+
+	return ys;
+}
+
+// TODO: reduce the awefully high number of clones using @ thruout the program
+fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
+	let mut uniq_nums = uniq(numbers);
+	quick_sort3(uniq_nums);
 	let numcnt = uniq_nums.len();
-	// TODO: sort
 	let mut exprs = ~[];
 	let mut avail = ~[];
-	for (i, num) in uniq_nums.iter().enumerate() {
-		exprs.push(val(**num,i,numcnt));
-		avail.push(numbers.count(**num));
+	let mut uniq_exprs = HashSet::new();
+	for (i, numref) in uniq_nums.iter().enumerate() {
+		let num = *numref;
+		let expr = val(num,i,numcnt);
+		uniq_exprs.insert(expr.clone());
+		exprs.push(expr);
+		avail.push(numbers.iter().count(|x| { *x == num }));
 	}
 
 	for expr in exprs.iter() {
@@ -190,7 +204,55 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(&Expr) -> bool) -> bool {
 		}
 	}
 
-	// TODO
+	let mut lower = 0;
+	let mut upper = numcnt;
+	while lower < upper {
+		if (!combinations_slice(lower, upper, |a, b| {
+			let aexpr = exprs[a].clone();
+			let bexpr = exprs[b].clone();
+			let mut used = std::vec::from_elem(numcnt, 0u);
+			let mut fits = true;
+			let mut ok   = true;
+
+			for i in range(0, numcnt) {
+				let u = aexpr.used[i] + bexpr.used[i];
+				used[i] = u;
+				if avail[i] < u {
+					fits = false;
+				}
+			}
+
+			if fits {
+				let mut hasroom = false;
+				for i in range(0, numcnt) {
+					if avail[i] != used[i] {
+						hasroom = true;
+						break;
+					}
+				}
+
+				ok = make(aexpr, bexpr, |expr| {
+					let mut ok = true;
+					if !uniq_exprs.contains(&expr) {
+						uniq_exprs.insert(expr.clone());
+						if expr.value == target {
+							ok = f(expr);
+						}
+						if hasroom && expr.value != target {
+							exprs.push(expr);
+						}
+					}
+
+					ok
+				});
+			}
+
+			ok
+		})) { return false; }
+
+		lower = upper;
+		upper = exprs.len();
+	}
 
 	return true;
 }
@@ -281,13 +343,6 @@ fn make(a: &Expr, b: &Expr, f: &fn(~Expr) -> bool) -> bool {
 	return true;
 }
 
-/*
-fn solve(target: uint, numbers: &[uint]) -> ~Expr {
-	// TODO
-
-	~Val(0)
-}
-*/
 fn main() {
 	let args = os::args();
 	if args.len() < 3 {
@@ -297,10 +352,53 @@ fn main() {
 	let numbers = args.slice(2,args.len()).map(|arg|
 		uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg)));
 
+/*
+	let n = 20;
+	let mut tbl = std::vec::from_elem(n, std::vec::from_elem(n, 0u));
+	let mut counter = 1;
+	combinations_slice(10, n, |x, y| {
+		tbl[y][x] = counter;
+		counter += 1;
+		true
+	});
+	let mut x = 0;
+	print("   ");
+	while x < n {
+		print(fmt!(" %3u", x+1));
+		x += 1;
+	}
+	print("\n");
+	let mut y = 0;
+	while y < n {
+		print(fmt!("%3u", y+1));
+		x = 0;
+		while x < n {
+			let v = tbl[y][x];
+			if (v == 0) {
+				print("    ");
+			}
+			else {
+				print(fmt!(" %3u", v));
+			}
+			x += 1;
+		}
+		print("\n");
+		y += 1;
+	}
+*/
+
 //	println(fmt!("%?", add(mul(val(2,0,6),val(3,1,6)),val(4,2,6)) == add(mul(val(2,3,6),val(3,4,6)),val(4,5,6))));
 	println(fmt!("target   = %u", target));
 	println(fmt!("numbers  = %s", numbers.map(|num| num.to_str()).connect(", ")));
 //	println(fmt!("solution = %s", solve(target, numbers).to_str()));
+
+	println("solutions:");
+	let mut i = 1;
+	solutions(target, numbers, |expr| {
+		println(fmt!("%3d: %s", i, expr.to_str()));
+		i += 1;
+		true
+	});
 
 //	let expr = mul(add(div(val(9),val(3)),val(2)),sub(val(2),val(3)));
 //	println(fmt!("%s = %d", expr.to_str(), expr.val()));
