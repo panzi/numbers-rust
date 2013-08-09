@@ -157,20 +157,6 @@ macro_rules! yield(
 	($($arg:expr),*) => (if !f($($arg),*) { return false; })
 )
 
-fn uniq(xs: &[uint]) -> ~[uint] {
-	let mut uniq_xs = HashSet::new();
-	let mut ys = ~[];
-
-	for x in xs.iter() {
-		if !uniq_xs.contains(x) {
-			uniq_xs.insert(*x);
-			ys.push(*x);
-		}
-	}
-
-	return ys;
-}
-
 fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool {
 	let numcnt = numbers.len();
 	let mut exprs = ~[];
