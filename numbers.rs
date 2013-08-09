@@ -4,24 +4,18 @@ use std::{uint,os};
 use std::hashmap::HashSet;
 use extra::sort::quick_sort3;
 
-macro_rules! printf(
-	($fmt:expr, $($arg:expr),*) => (
-		print(fmt!($fmt, $($arg),*))
-	)
-)
-
 enum Op {
 	Add(@Expr,@Expr),
 	Sub(@Expr,@Expr),
 	Mul(@Expr,@Expr),
 	Div(@Expr,@Expr),
-	Val
+	Val(uint)
 }
 
 struct Expr {
 	op: Op,
 	value: uint,
-	used: ~[uint]
+	used: ~[bool]
 }
 
 impl Expr {
@@ -31,11 +25,25 @@ impl Expr {
 			Sub(_,_) => 0,
 			Mul(_,_) => 2,
 			Div(_,_) => 1,
-			Val => 3
+			Val(_)   => 3
+		}
+	}
+	
+	fn order(&self) -> (uint, uint) {
+		match self.op {
+			Val(index) => (0, index),
+			Add(_,_)   => (1, self.value),
+			Sub(_,_)   => (2, self.value),
+			Mul(_,_)   => (3, self.value),
+			Div(_,_)   => (4, self.value)
 		}
 	}
 	
 	fn to_str_under(&self,precedence: uint) -> ~str {
+//		match self.op {
+//			Val(_) => self.value.to_str(),
+//			_      => fmt!("(%s)", self.to_str())
+//		}
 		if (precedence > self.precedence()) {
 			return fmt!("(%s)", self.to_str());
 		}
@@ -60,7 +68,7 @@ impl IterBytes for Expr {
 			Sub(left, right) => bin_iter_bytes!('-'),
 			Mul(left, right) => bin_iter_bytes!('*'),
 			Div(left, right) => bin_iter_bytes!('/'),
-			Val => self.value.iter_bytes(lsb0,f)
+			Val(index)       => index.iter_bytes(lsb0,f)
 		}
 	}
 }
@@ -84,8 +92,8 @@ impl Eq for Expr {
 				Div(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
-			Val => match other.op {
-				Val => self.value == other.value,
+			Val(index) => match other.op {
+				Val(oindex) => index == oindex,
 				_ => false
 			}
 		}
@@ -100,24 +108,23 @@ impl ToStr for Expr {
 			Sub(left, right) => fmt!("%s - %s", left.to_str_under(p), right.to_str_under(p)),
 			Mul(left, right) => fmt!("%s * %s", left.to_str_under(p), right.to_str_under(p)),
 			Div(left, right) => fmt!("%s / %s", left.to_str_under(p), right.to_str_under(p)),
-			Val => self.value.to_str()
+			Val(_)           => self.value.to_str()
 		}
 	}
 }
 
 fn val(value: uint, index: uint, numcnt: uint) -> @Expr {
-	let mut used = std::vec::from_elem(numcnt, 0u);
-	used[index] = 1;
-	@Expr { op: Val, value: value, used: used }
+	let mut used = std::vec::from_elem(numcnt, false);
+	used[index] = true;
+	@Expr { op: Val(index), value: value, used: used }
 }
 
-fn join_usage(left: &Expr, right: &Expr) -> ~[uint] {
+fn join_usage(left: &Expr, right: &Expr) -> ~[bool] {
 	let mut used = left.used.to_owned();
-	let n = right.used.len();
-	let mut i = 0;
-	while i < n {
-		used[i] += right.used[i];
-		i += 1;
+	for i in range(0, right.used.len()) {
+		if (right.used[i]) {
+			used[i] = true;
+		}
 	}
 	return used;
 }
@@ -164,19 +171,16 @@ fn uniq(xs: &[uint]) -> ~[uint] {
 	return ys;
 }
 
-fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
-	let mut uniq_nums = uniq(numbers);
-	quick_sort3(uniq_nums);
-	let numcnt = uniq_nums.len();
+fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool {
+	let numcnt = numbers.len();
 	let mut exprs = ~[];
-	let mut avail = ~[];
 	let mut uniq_exprs = HashSet::new();
-	for (i, numref) in uniq_nums.iter().enumerate() {
+	quick_sort3(numbers);
+	for (i, numref) in numbers.iter().enumerate() {
 		let num = *numref;
 		let expr = val(num,i,numcnt);
 		uniq_exprs.insert(expr);
 		exprs.push(expr);
-		avail.push(numbers.iter().count(|x| { *x == num }));
 	}
 
 	for expr in exprs.iter() {
@@ -187,7 +191,6 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 
 	let mut lower = 0;
 	let mut upper = numcnt;
-	let mut used  = std::vec::from_elem(numcnt, 0u);
 	while lower < upper {
 		if (!combinations_slice(lower, upper, |a, b| {
 			let aexpr = exprs[a];
@@ -196,17 +199,16 @@ fn solutions(target: uint, numbers: &[uint], f: &fn(@Expr) -> bool) -> bool {
 			let mut ok   = true;
 
 			for i in range(0, numcnt) {
-				let u = aexpr.used[i] + bexpr.used[i];
-				used[i] = u;
-				if avail[i] < u {
+				if aexpr.used[i] && bexpr.used[i] {
 					fits = false;
+					break;
 				}
 			}
 
 			if fits {
 				let mut hasroom = false;
 				for i in range(0, numcnt) {
-					if avail[i] != used[i] {
+					if !aexpr.used[i] || !bexpr.used[i] {
 						hasroom = true;
 						break;
 					}
@@ -269,13 +271,15 @@ fn combinations_slice(lower: uint, upper: uint, f: &fn(uint,uint) -> bool) -> bo
 }
 
 fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
-	yield!(add(a,b));
-
-	if a.value != 1 && b.value != 1 {
-		yield!(mul(a,b));
-	}
-
+	// bring commutative operations in normalized order
+	// TODO: proper normalization of expressions
 	if a.value > b.value {
+		yield!(add(a,b));
+
+		if a.value != 1 && b.value != 1 {
+			yield!(mul(a,b));
+		}
+
 		yield!(sub(a,b));
 
 		if b.value != 1 && a.value % b.value == 0 {
@@ -283,14 +287,39 @@ fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
 		}
 	}
 	else if b.value > a.value {
+		yield!(add(b,a));
+
+		if b.value != 1 && a.value != 1 {
+			yield!(mul(b,a));
+		}
+
 		yield!(sub(b,a));
 
 		if a.value != 1 && b.value % a.value == 0 {
 			yield!(div(b,a));
 		}
 	}
-	else if b.value != 1 {
-		yield!(div(a,b));
+	else if a.order() > b.order() {
+		yield!(add(a,b));
+
+		if a.value != 1 && b.value != 1 {
+			yield!(mul(a,b));
+		}
+
+		if b.value != 1 {
+			yield!(div(a,b));
+		}
+	}
+	else {
+		yield!(add(b,a));
+
+		if b.value != 1 && a.value != 1 {
+			yield!(mul(b,a));
+		}
+
+		if a.value != 1 {
+			yield!(div(b,a));
+		}
 	}
 
 	return true;
@@ -302,8 +331,11 @@ fn main() {
 		fail!("not enough arguments");
 	}
 	let target = uint::from_str(args[1]).expect("target is not a number");
-	let mut numbers = args.slice(2,args.len()).map(|arg|
-		uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg)));
+	let mut numbers = args.slice(2,args.len()).map(|arg| {
+		let num = uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg));
+		if num == 0 { fail!(fmt!("illegal argument value: %s",*arg)); }
+		num
+	});
 	quick_sort3(numbers);
 
 	println(fmt!("target  = %u", target));
