@@ -18,24 +18,26 @@ struct Expr {
 	used: ~[bool]
 }
 
+struct NumericHashedExpr {
+	expr: @Expr
+}
+
+macro_rules! bin_numeric_iter_bytes(
+	($op:expr) => (
+		$op.iter_bytes(          lsb0, |buf| { f(buf) }) &&
+		left.numeric_iter_bytes( lsb0, |buf| { f(buf) }) &&
+		right.numeric_iter_bytes(lsb0, |buf| { f(buf) })
+	)
+)
+
 impl Expr {
 	fn precedence(&self) -> uint {
 		match self.op {
 			Add(_,_) => 0,
-			Sub(_,_) => 0,
-			Mul(_,_) => 2,
-			Div(_,_) => 1,
-			Val(_)   => 3
-		}
-	}
-	
-	fn order(&self) -> (uint, uint) {
-		match self.op {
-			Val(index) => (0, index),
-			Add(_,_)   => (1, self.value),
-			Sub(_,_)   => (2, self.value),
-			Mul(_,_)   => (3, self.value),
-			Div(_,_)   => (4, self.value)
+			Sub(_,_) => 1,
+			Mul(_,_) => 3,
+			Div(_,_) => 2,
+			Val(_)   => 4
 		}
 	}
 	
@@ -49,6 +51,41 @@ impl Expr {
 		}
 		else {
 			return self.to_str();
+		}
+	}
+
+	fn numeric_iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
+		match self.op {
+			Add(left, right) => bin_numeric_iter_bytes!('+'),
+			Sub(left, right) => bin_numeric_iter_bytes!('-'),
+			Mul(left, right) => bin_numeric_iter_bytes!('*'),
+			Div(left, right) => bin_numeric_iter_bytes!('/'),
+			Val(_)           => self.value.iter_bytes(lsb0,f)
+		}
+	}
+	
+	fn numeric_eq(&self, other: &Expr) -> bool {
+		match self.op {
+			Add(left, right) => match other.op {
+				Add(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
+				_ => false
+			},
+			Sub(left, right) => match other.op {
+				Sub(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
+				_ => false
+			},
+			Mul(left, right) => match other.op {
+				Mul(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
+				_ => false
+			},
+			Div(left, right) => match other.op {
+				Div(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
+				_ => false
+			},
+			Val(_) => match other.op {
+				Val(_) => self.value == other.value,
+				_ => false
+			}
 		}
 	}
 }
@@ -70,6 +107,12 @@ impl IterBytes for Expr {
 			Div(left, right) => bin_iter_bytes!('/'),
 			Val(index)       => index.iter_bytes(lsb0,f)
 		}
+	}
+}
+
+impl IterBytes for NumericHashedExpr {
+	fn iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
+		self.expr.numeric_iter_bytes(lsb0,f)
 	}
 }
 
@@ -100,6 +143,12 @@ impl Eq for Expr {
 	}
 }
 
+impl Eq for NumericHashedExpr {
+	fn eq(&self, other: &NumericHashedExpr) -> bool {
+		self.expr.numeric_eq(other.expr)
+	}
+}
+
 impl ToStr for Expr {
 	fn to_str(&self) -> ~str {
 		let p = self.precedence();
@@ -113,44 +162,215 @@ impl ToStr for Expr {
 	}
 }
 
-fn val(value: uint, index: uint, numcnt: uint) -> @Expr {
-	let mut used = std::vec::from_elem(numcnt, false);
-	used[index] = true;
-	@Expr { op: Val(index), value: value, used: used }
-}
-
 fn join_usage(left: &Expr, right: &Expr) -> ~[bool] {
 	let mut used = left.used.to_owned();
 	for i in range(0, right.used.len()) {
-		if (right.used[i]) {
+		if right.used[i] {
 			used[i] = true;
 		}
 	}
 	return used;
 }
 
-fn add(left: @Expr, right: @Expr) -> @Expr {
+fn split_add_sub(mut node: @Expr) -> (~[@Expr], ~[@Expr]) {
+	let mut adds = ~[];
+	let mut subs = ~[];
+
+	loop {
+		match node.op {
+			Add(left,right) => {
+				adds.push(right);
+				node = left;
+			},
+			Sub(left,right) => {
+				subs.push(right);
+				node = left;
+			},
+			_ => break
+		}
+	}
+	adds.push(node);
+
+	return (adds, subs);
+}
+
+fn split_mul_div(mut node: @Expr) -> (~[@Expr], ~[@Expr]) {
+	let mut muls = ~[];
+	let mut divs = ~[];
+
+	loop {
+		match node.op {
+			Mul(left,right) => {
+				muls.push(right);
+				node = left;
+			},
+			Div(left,right) => {
+				divs.push(right);
+				node = left;
+			},
+			_ => break
+		}
+	}
+	muls.push(node);
+
+	return (muls, divs);
+}
+
+// merge and reverse
+fn merge(mut left: ~[@Expr], mut right: ~[@Expr]) -> ~[@Expr] {
+	let n = left.len();
+	let m = right.len();
+
+	if n > 0 && m > 0 {
+		let mut lst = ~[];
+		let mut i = n - 1;
+		let mut j = m - 1;
+
+		loop {
+			let x = left[i];
+			let y = right[j];
+
+			if x.value <= y.value {
+				lst.push(x);
+				
+				if i == 0 {
+					loop {
+						lst.push(right[j]);
+						if j == 0 { break; }
+						j -= 1;
+					}
+					break;
+				}
+				i -= 1;
+			}
+			else {
+				lst.push(y);
+
+				if j == 0 {
+					loop {
+						lst.push(left[i]);
+						if i == 0 { break; }
+						i -= 1;
+					}
+					break;
+				}
+				j -= 1;
+			}
+		}
+
+		return lst;
+	}
+	else if n > 0 {
+		left.reverse();
+		return left;
+	}
+	else {
+		right.reverse();
+		return right;
+	}
+}
+
+#[inline]
+fn val(value: uint, index: uint, numcnt: uint) -> @Expr {
+	let mut used = std::vec::from_elem(numcnt, false);
+	used[index] = true;
+	@Expr { op: Val(index), value: value, used: used }
+}
+
+#[inline]
+fn _add(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value + right.value;
 	@Expr { op: Add(left, right), value: value, used: used }
 }
 
-fn sub(left: @Expr, right: @Expr) -> @Expr {
+#[inline]
+fn add(left: @Expr, right: @Expr) -> @Expr {
+	let (left_adds,  left_subs)  = split_add_sub(left);
+	let (right_adds, right_subs) = split_add_sub(right);
+
+	let adds = merge(left_adds, right_adds);
+	let subs = merge(left_subs, right_subs);
+	let mut node = adds[0];
+	for i in range(1,adds.len()) {
+		node = _add(node,adds[i]);
+	}
+	for right in subs.iter() {
+		node = _sub(node,*right);
+	}
+	return node;
+}
+
+#[inline]
+fn _sub(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value - right.value;
 	@Expr { op: Sub(left, right), value: value, used: used }
 }
 
-fn mul(left: @Expr, right: @Expr) -> @Expr {
+#[inline]
+fn sub(left: @Expr, right: @Expr) -> @Expr {
+	let (left_adds,  left_subs)  = split_add_sub(left);
+	let (right_subs, right_adds) = split_add_sub(right);
+
+	let adds = merge(left_adds, right_adds);
+	let subs = merge(left_subs, right_subs);
+	let mut node = adds[0];
+	for i in range(1,adds.len()) {
+		node = _add(node,adds[i]);
+	}
+	for right in subs.iter() {
+		node = _sub(node,*right);
+	}
+	return node;
+}
+
+#[inline]
+fn _mul(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value * right.value;
 	@Expr { op: Mul(left, right), value: value, used: used }
 }
 
-fn div(left: @Expr, right: @Expr) -> @Expr {
+#[inline]
+fn mul(left: @Expr, right: @Expr) -> @Expr {
+	let (left_muls,  left_divs)  = split_mul_div(left);
+	let (right_muls, right_divs) = split_mul_div(right);
+
+	let muls = merge(left_muls, right_muls);
+	let divs = merge(left_divs, right_divs);
+	let mut node = muls[0];
+	for i in range(1,muls.len()) {
+		node = _mul(node,muls[i]);
+	}
+	for right in divs.iter() {
+		node = _div(node,*right);
+	}
+	return node;
+}
+
+#[inline]
+fn _div(left: @Expr, right: @Expr) -> @Expr {
 	let used = join_usage(left,right);
 	let value = left.value / right.value;
 	@Expr { op: Div(left, right), value: value, used: used }
+}
+
+#[inline]
+fn div(left: @Expr, right: @Expr) -> @Expr {
+	let (left_muls,  left_divs)  = split_mul_div(left);
+	let (right_divs, right_muls) = split_mul_div(right);
+
+	let muls = merge(left_muls, right_muls);
+	let divs = merge(left_divs, right_divs);
+	let mut node = muls[0];
+	for i in range(1,muls.len()) {
+		node = _mul(node,muls[i]);
+	}
+	for right in divs.iter() {
+		node = _div(node,*right);
+	}
+	return node;
 }
 
 macro_rules! yield(
@@ -257,15 +477,13 @@ fn combinations_slice(lower: uint, upper: uint, f: &fn(uint,uint) -> bool) -> bo
 }
 
 fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
-	// bring commutative operations in normalized order
-	// TODO: proper normalization of expressions
+	yield!(add(a,b));
+
+	if a.value != 1 && b.value != 1 {
+		yield!(mul(a,b));
+	}
+
 	if a.value > b.value {
-		yield!(add(a,b));
-
-		if a.value != 1 && b.value != 1 {
-			yield!(mul(a,b));
-		}
-
 		yield!(sub(a,b));
 
 		if b.value != 1 && a.value % b.value == 0 {
@@ -273,39 +491,14 @@ fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
 		}
 	}
 	else if b.value > a.value {
-		yield!(add(b,a));
-
-		if b.value != 1 && a.value != 1 {
-			yield!(mul(b,a));
-		}
-
 		yield!(sub(b,a));
 
 		if a.value != 1 && b.value % a.value == 0 {
 			yield!(div(b,a));
 		}
 	}
-	else if a.order() > b.order() {
-		yield!(add(a,b));
-
-		if a.value != 1 && b.value != 1 {
-			yield!(mul(a,b));
-		}
-
-		if b.value != 1 {
-			yield!(div(a,b));
-		}
-	}
-	else {
-		yield!(add(b,a));
-
-		if b.value != 1 && a.value != 1 {
-			yield!(mul(b,a));
-		}
-
-		if a.value != 1 {
-			yield!(div(b,a));
-		}
+	else if b.value != 1 {
+		yield!(div(a,b));
 	}
 
 	return true;
@@ -329,9 +522,14 @@ fn main() {
 
 	println("solutions:");
 	let mut i = 1;
+	let mut uniq_exprs = HashSet::new();
 	solutions(target, numbers, |expr| {
-		println(fmt!("%3d: %s", i, expr.to_str()));
-		i += 1;
+		let wrapped = NumericHashedExpr { expr: expr };
+		if !uniq_exprs.contains(&wrapped) {
+			uniq_exprs.insert(wrapped);
+			println(fmt!("%3d: %s", i, expr.to_str()));
+			i += 1;
+		}
 		true
 	});
 }
