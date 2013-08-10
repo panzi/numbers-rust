@@ -2,6 +2,7 @@ extern mod extra;
 
 use std::{uint,os};
 use std::hashmap::HashSet;
+use std::util::swap;
 use extra::sort::quick_sort3;
 
 enum Op {
@@ -285,7 +286,28 @@ fn _add(left: @Expr, right: @Expr) -> @Expr {
 }
 
 #[inline]
-fn add(left: @Expr, right: @Expr) -> @Expr {
+fn add(mut left: @Expr, mut right: @Expr) -> @Expr {
+	if left.value > right.value {
+		swap(&mut left, &mut right);
+	}
+
+	// don't run normalization algorithm if already normalized
+	match right.op {
+		Add(_,_) => {},
+		Sub(_,_) => {},
+		_ => {
+			match left.op {
+				Add(_,lright) => {
+					if lright.value <= right.value {
+						return _add(left, right);
+					}
+				},
+				Sub(_,_) => {},
+				_ => return _add(left, right)
+			}
+		}
+	}
+
 	let (left_adds,  left_subs)  = split_add_sub(left);
 	let (right_adds, right_subs) = split_add_sub(right);
 
@@ -310,6 +332,22 @@ fn _sub(left: @Expr, right: @Expr) -> @Expr {
 
 #[inline]
 fn sub(left: @Expr, right: @Expr) -> @Expr {
+	// don't run normalization algorithm if already normalized
+	match right.op {
+		Add(_,_) => {},
+		Sub(_,_) => {},
+		_ => {
+			match left.op {
+				Sub(_,lright) => {
+					if lright.value <= right.value {
+						return _sub(left, right);
+					}
+				},
+				_ => return _sub(left, right)
+			}
+		}
+	}
+
 	let (left_adds,  left_subs)  = split_add_sub(left);
 	let (right_subs, right_adds) = split_add_sub(right);
 
@@ -333,7 +371,28 @@ fn _mul(left: @Expr, right: @Expr) -> @Expr {
 }
 
 #[inline]
-fn mul(left: @Expr, right: @Expr) -> @Expr {
+fn mul(mut left: @Expr, mut right: @Expr) -> @Expr {
+	if left.value > right.value {
+		swap(&mut left, &mut right);
+	}
+
+	// don't run normalization algorithm if already normalized
+	match right.op {
+		Mul(_,_) => {},
+		Div(_,_) => {},
+		_ => {
+			match left.op {
+				Mul(_,lright) => {
+					if lright.value <= right.value {
+						return _mul(left, right);
+					}
+				},
+				Div(_,_) => {},
+				_ => return _mul(left, right)
+			}
+		}
+	}
+
 	let (left_muls,  left_divs)  = split_mul_div(left);
 	let (right_muls, right_divs) = split_mul_div(right);
 
@@ -358,6 +417,22 @@ fn _div(left: @Expr, right: @Expr) -> @Expr {
 
 #[inline]
 fn div(left: @Expr, right: @Expr) -> @Expr {
+	// don't run normalization algorithm if already normalized
+	match right.op {
+		Mul(_,_) => {},
+		Div(_,_) => {},
+		_ => {
+			match left.op {
+				Div(_,lright) => {
+					if lright.value <= right.value {
+						return _div(left, right);
+					}
+				},
+				_ => return _div(left, right)
+			}
+		}
+	}
+
 	let (left_muls,  left_divs)  = split_mul_div(left);
 	let (right_divs, right_muls) = split_mul_div(right);
 
