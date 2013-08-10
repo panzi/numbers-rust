@@ -474,83 +474,52 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 	let mut lower = 0;
 	let mut upper = numcnt;
 	while lower < upper {
-		if (!combinations_slice(lower, upper, |a, b| {
-			let aexpr = exprs[a];
-			let bexpr = exprs[b];
-			let mut fits = true;
-			let mut ok   = true;
+		for b in range(lower,upper) {
+			for a in range(0,b) {
+				let aexpr = exprs[a];
+				let bexpr = exprs[b];
+				let mut fits = true;
 
-			for i in range(0, numcnt) {
-				if aexpr.used[i] && bexpr.used[i] {
-					fits = false;
-					break;
-				}
-			}
-
-			if fits {
-				let mut hasroom = false;
 				for i in range(0, numcnt) {
-					if !aexpr.used[i] || !bexpr.used[i] {
-						hasroom = true;
+					if aexpr.used[i] && bexpr.used[i] {
+						fits = false;
 						break;
 					}
 				}
 
-				ok = make(aexpr, bexpr, |expr| {
-					let mut ok = true;
-					if !uniq_exprs.contains(&expr) {
-						uniq_exprs.insert(expr);
-						if expr.value == target {
-							let wrapped = NumericHashedExpr { expr: expr };
-							if !uniq_solutions.contains(&wrapped) {
-								uniq_solutions.insert(wrapped);
-								ok = f(expr);
-							}
-						}
-						else if hasroom {
-							exprs.push(expr);
+				if fits {
+					let mut hasroom = false;
+					for i in range(0, numcnt) {
+						if !aexpr.used[i] || !bexpr.used[i] {
+							hasroom = true;
+							break;
 						}
 					}
 
-					ok
-				});
-			}
+					if !make(aexpr, bexpr, |expr| {
+						let mut ok = true;
+						if !uniq_exprs.contains(&expr) {
+							uniq_exprs.insert(expr);
+							if expr.value == target {
+								let wrapped = NumericHashedExpr { expr: expr };
+								if !uniq_solutions.contains(&wrapped) {
+									uniq_solutions.insert(wrapped);
+									ok = f(expr);
+								}
+							}
+							else if hasroom {
+								exprs.push(expr);
+							}
+						}
 
-			ok
-		})) { return false; }
+						ok
+					}) { return false; }
+				}
+			}
+		}
 
 		lower = upper;
 		upper = exprs.len();
-	}
-
-	return true;
-}
-
-fn combinations_slice(lower: uint, upper: uint, f: &fn(uint,uint) -> bool) -> bool {
-	if lower >= upper { return true; }
-
-	let mut i = lower;
-	while i < upper {
-		let mut a = 0;
-		let mut b = i;
-		while b > a && b >= lower {
-			yield!(a, b);
-			b -= 1;
-			a += 1;
-		}
-		i += 1;
-	}
-
-	i = 1;
-	while i < upper {
-		let mut a = i;
-		let mut b = upper - 1;
-		while b > a && b >= lower {
-			yield!(a, b);
-			b -= 1;
-			a += 1;
-		}
-		i += 1;
 	}
 
 	return true;
