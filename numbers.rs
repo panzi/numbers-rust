@@ -456,6 +456,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 	let numcnt = numbers.len();
 	let mut exprs = ~[];
 	let mut uniq_exprs = HashSet::new();
+	let mut uniq_solutions = HashSet::new();
 	quick_sort3(numbers);
 	for (i, numref) in numbers.iter().enumerate() {
 		let num = *numref;
@@ -500,9 +501,13 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 					if !uniq_exprs.contains(&expr) {
 						uniq_exprs.insert(expr);
 						if expr.value == target {
-							ok = f(expr);
+							let wrapped = NumericHashedExpr { expr: expr };
+							if !uniq_solutions.contains(&wrapped) {
+								uniq_solutions.insert(wrapped);
+								ok = f(expr);
+							}
 						}
-						if hasroom && expr.value != target {
+						else if hasroom {
 							exprs.push(expr);
 						}
 					}
@@ -597,14 +602,9 @@ fn main() {
 
 	println("solutions:");
 	let mut i = 1;
-	let mut uniq_exprs = HashSet::new();
 	solutions(target, numbers, |expr| {
-		let wrapped = NumericHashedExpr { expr: expr };
-		if !uniq_exprs.contains(&wrapped) {
-			uniq_exprs.insert(wrapped);
-			println(fmt!("%3d: %s", i, expr.to_str()));
-			i += 1;
-		}
+		println(fmt!("%3d: %s", i, expr.to_str()));
+		i += 1;
 		true
 	});
 }
