@@ -16,7 +16,7 @@ enum Op {
 struct Expr {
 	op: Op,
 	value: uint,
-	used: ~[bool]
+	used: u64
 }
 
 struct NumericHashedExpr {
@@ -163,16 +163,6 @@ impl ToStr for Expr {
 	}
 }
 
-fn join_usage(left: &Expr, right: &Expr) -> ~[bool] {
-	let mut used = left.used.to_owned();
-	for i in range(0, right.used.len()) {
-		if right.used[i] {
-			used[i] = true;
-		}
-	}
-	return used;
-}
-
 fn split_add_sub(mut node: @Expr) -> (~[@Expr], ~[@Expr]) {
 	let mut adds = ~[];
 	let mut subs = ~[];
@@ -272,15 +262,13 @@ fn merge(mut left: ~[@Expr], mut right: ~[@Expr]) -> ~[@Expr] {
 }
 
 #[inline]
-fn val(value: uint, index: uint, numcnt: uint) -> @Expr {
-	let mut used = std::vec::from_elem(numcnt, false);
-	used[index] = true;
-	@Expr { op: Val(index), value: value, used: used }
+fn val(value: uint, index: uint) -> @Expr {
+	@Expr { op: Val(index), value: value, used: 1u64 << index }
 }
 
 #[inline]
 fn _add(left: @Expr, right: @Expr) -> @Expr {
-	let used = join_usage(left,right);
+	let used = left.used | right.used;
 	let value = left.value + right.value;
 	@Expr { op: Add(left, right), value: value, used: used }
 }
@@ -325,7 +313,7 @@ fn add(mut left: @Expr, mut right: @Expr) -> @Expr {
 
 #[inline]
 fn _sub(left: @Expr, right: @Expr) -> @Expr {
-	let used = join_usage(left,right);
+	let used = left.used | right.used;
 	let value = left.value - right.value;
 	@Expr { op: Sub(left, right), value: value, used: used }
 }
@@ -365,7 +353,7 @@ fn sub(left: @Expr, right: @Expr) -> @Expr {
 
 #[inline]
 fn _mul(left: @Expr, right: @Expr) -> @Expr {
-	let used = join_usage(left,right);
+	let used = left.used | right.used;
 	let value = left.value * right.value;
 	@Expr { op: Mul(left, right), value: value, used: used }
 }
@@ -410,7 +398,7 @@ fn mul(mut left: @Expr, mut right: @Expr) -> @Expr {
 
 #[inline]
 fn _div(left: @Expr, right: @Expr) -> @Expr {
-	let used = join_usage(left,right);
+	let used = left.used | right.used;
 	let value = left.value / right.value;
 	@Expr { op: Div(left, right), value: value, used: used }
 }
@@ -454,13 +442,14 @@ macro_rules! yield(
 
 fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool {
 	let numcnt = numbers.len();
+	let full_usage = !(!0u64 << numcnt);
 	let mut exprs = ~[];
 	let mut uniq_exprs = HashSet::new();
 	let mut uniq_solutions = HashSet::new();
 	quick_sort3(numbers);
 	for (i, numref) in numbers.iter().enumerate() {
 		let num = *numref;
-		let expr = val(num,i,numcnt);
+		let expr = val(num,i);
 		uniq_exprs.insert(expr);
 		exprs.push(expr);
 	}
@@ -478,23 +467,9 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 			for a in range(0,b) {
 				let aexpr = exprs[a];
 				let bexpr = exprs[b];
-				let mut fits = true;
 
-				for i in range(0, numcnt) {
-					if aexpr.used[i] && bexpr.used[i] {
-						fits = false;
-						break;
-					}
-				}
-
-				if fits {
-					let mut hasroom = false;
-					for i in range(0, numcnt) {
-						if !aexpr.used[i] || !bexpr.used[i] {
-							hasroom = true;
-							break;
-						}
-					}
+				if aexpr.used & bexpr.used == 0 {
+					let hasroom = (aexpr.used | bexpr.used) != full_usage;
 
 					if !make(aexpr, bexpr, |expr| {
 						let mut ok = true;
@@ -564,6 +539,9 @@ fn main() {
 		if num == 0 { fail!(fmt!("illegal argument value: %s",*arg)); }
 		num
 	});
+	if (numbers.len() > 64) {
+		fail!("only up to 64 numbers supported");
+	}
 	quick_sort3(numbers);
 
 	println(fmt!("target  = %u", target));

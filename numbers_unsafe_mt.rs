@@ -23,7 +23,7 @@ enum Op {
 struct Expr {
 	priv op: Op,
 	priv value: uint,
-	priv used: ~[bool]
+	priv used: u64
 }
 
 struct NumericHashedExpr {
@@ -174,16 +174,6 @@ impl ToStr for Expr {
 	}
 }
 
-unsafe fn join_usage(left: *Expr, right: *Expr) -> ~[bool] {
-	let mut used = (*left).used.to_owned();
-	for i in range(0, (*right).used.len()) {
-		if (*right).used[i] {
-			used[i] = true;
-		}
-	}
-	return used;
-}
-
 unsafe fn split_add_sub(mut node: *Expr) -> (~[*Expr], ~[*Expr]) {
 	let mut adds = ~[];
 	let mut subs = ~[];
@@ -289,7 +279,7 @@ impl Solver {
 	}
 
 	#[inline]
-	fn expr(&mut self, op: Op, value: uint, used: ~[bool]) -> *Expr {
+	fn expr(&mut self, op: Op, value: uint, used: u64) -> *Expr {
 		let expr = ~Expr { op: op, value: value, used: used };
 		let ptr: *Expr = &*expr;
 		self.exprs.push(expr);
@@ -297,15 +287,13 @@ impl Solver {
 	}
 
 	#[inline]
-	fn val(&mut self, value: uint, index: uint, numcnt: uint) -> *Expr {
-		let mut used = std::vec::from_elem(numcnt, false);
-		used[index] = true;
-		self.expr(Val(index), value, used)
+	fn val(&mut self, value: uint, index: uint) -> *Expr {
+		self.expr(Val(index), value, 1u64 << index)
 	}
 
 	#[inline]
 	unsafe fn _add(&mut self, left: *Expr, right: *Expr) -> *Expr {
-		let used = join_usage(left,right);
+		let used = (*left).used | (*right).used;
 		let value = (*left).value + (*right).value;
 		self.expr(Add(left, right), value, used)
 	}
@@ -349,7 +337,7 @@ impl Solver {
 
 	#[inline]
 	unsafe fn _sub(&mut self, left: *Expr, right: *Expr) -> *Expr {
-		let used = join_usage(left,right);
+		let used = (*left).used | (*right).used;
 		let value = (*left).value - (*right).value;
 		self.expr(Sub(left, right), value, used)
 	}
@@ -388,7 +376,7 @@ impl Solver {
 
 	#[inline]
 	unsafe fn _mul(&mut self, left: *Expr, right: *Expr) -> *Expr {
-		let used = join_usage(left,right);
+		let used = (*left).used | (*right).used;
 		let value = (*left).value * (*right).value;
 		self.expr(Mul(left, right), value, used)
 	}
@@ -432,7 +420,7 @@ impl Solver {
 
 	#[inline]
 	unsafe fn _div(&mut self, left: *Expr, right: *Expr) -> *Expr {
-		let used = join_usage(left,right);
+		let used = (*left).used | (*right).used;
 		let value = (*left).value / (*right).value;
 		self.expr(Div(left, right), value, used)
 	}
@@ -504,6 +492,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 	}
 
 	let numcnt = numbers.len();
+	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
 	let mut h = Helper { exprs: ~[] };
 	let mut uniq_exprs: HashSet<&Expr> = HashSet::new();
@@ -513,7 +502,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 	unsafe {
 		for (i, numref) in numbers.iter().enumerate() {
 			let num = *numref;
-			let expr = solver.val(num,i,numcnt);
+			let expr = solver.val(num,i);
 			let ptr: *Expr = &*expr;
 			uniq_exprs.insert(&*expr);
 			h.exprs.push(ptr);
@@ -539,12 +528,12 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 				let unsafe_h: *Helper = &h;
 				let chan_clone = chan.clone();
 				do spawn_with(lower) |lower| {
-					work(lower, mid, (*unsafe_h).exprs, &chan_clone);
+					work(lower, mid, (*unsafe_h).exprs, full_usage, &chan_clone);
 				}
 
 				let chan_clone = chan.clone();
 				do spawn_with(upper) |upper| {
-					work(mid, upper, (*unsafe_h).exprs, &chan_clone);
+					work(mid, upper, (*unsafe_h).exprs, full_usage, &chan_clone);
 				}
 
 				while workers > 0 {
@@ -590,31 +579,15 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 	return true;
 }
 
-fn work (lower: uint, upper: uint, exprs: &[*Expr], chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
 		for a in range(0,b) {
 			unsafe {
-				let aexpr  = exprs[a];
-				let bexpr  = exprs[b];
-				let numcnt = (*aexpr).used.len();
-				let mut fits = true;
+				let aexpr = exprs[a];
+				let bexpr = exprs[b];
 
-				for i in range(0, numcnt) {
-					if (*aexpr).used[i] && (*bexpr).used[i] {
-						fits = false;
-						break;
-					}
-				}
-	
-				if fits {
-					let mut hasroom = false;
-					for i in range(0, numcnt) {
-						if !(*aexpr).used[i] || !(*bexpr).used[i] {
-							hasroom = true;
-							break;
-						}
-					}
-	
+				if (*aexpr).used & (*bexpr).used == 0 {
+					let hasroom = ((*aexpr).used | (*bexpr).used) != full_usage;
 					chan.send(Some((hasroom, aexpr, bexpr)));
 				}
 			}
@@ -634,6 +607,9 @@ fn main() {
 		if num == 0 { fail!(fmt!("illegal argument value: %s",*arg)); }
 		num
 	});
+	if (numbers.len() > 64) {
+		fail!("only up to 64 numbers supported");
+	}
 	quick_sort3(numbers);
 
 	println(fmt!("target  = %u", target));
