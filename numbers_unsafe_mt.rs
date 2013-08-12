@@ -3,6 +3,9 @@ extern mod extra;
 use std::{uint,os};
 use std::hashmap::HashSet;
 use std::util::swap;
+use std::num::sqrt;
+use std::task::spawn_with;
+use std::comm::SharedChan;
 use extra::sort::quick_sort3;
 
 macro_rules! yield(
@@ -125,14 +128,6 @@ impl IterBytes for NumericHashedExpr {
 	}
 }
 
-/*
-impl IterBytes for *Expr {
-	fn iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
-		unsafe { (*self).iter_bytes(lsb0, f) }
-	}
-}
-*/
-
 impl Eq for Expr {
 	fn eq(&self, other: &Expr) -> bool {
 		match self.op {
@@ -165,14 +160,6 @@ impl Eq for NumericHashedExpr {
 		unsafe { (*(self.expr)).numeric_eq(&*other.expr) }
 	}
 }
-
-/*
-impl Eq for *Expr {
-	fn eq(&self, other: &*Expr) -> bool {
-		unsafe { (*self) == (*other)  }
-	}
-}
-*/
 
 impl ToStr for Expr {
 	fn to_str(&self) -> ~str {
@@ -512,9 +499,13 @@ impl Solver {
 }
 
 fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool {
+	struct Helper {
+		exprs: ~[*Expr]
+	}
+
 	let numcnt = numbers.len();
 	let mut solver = Solver::new();
-	let mut exprs: ~[*Expr] = ~[];
+	let mut h = Helper { exprs: ~[] };
 	let mut uniq_exprs: HashSet<&Expr> = HashSet::new();
 	let mut uniq_solutions = HashSet::new();
 	quick_sort3(numbers);
@@ -525,10 +516,10 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 			let expr = solver.val(num,i,numcnt);
 			let ptr: *Expr = &*expr;
 			uniq_exprs.insert(&*expr);
-			exprs.push(ptr);
+			h.exprs.push(ptr);
 		}
 
-		for expr in exprs.iter() {
+		for expr in h.exprs.iter() {
 			if (**expr).value == target {
 				yield!(&**expr);
 			}
@@ -536,57 +527,100 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 
 		let mut lower = 0;
 		let mut upper = numcnt;
+		let (port, chan) = stream();
+		let chan = SharedChan::new(chan);
+
 		while lower < upper {
-			for b in range(lower,upper) {
-				for a in range(0,b) {
-					let aexpr = exprs[a];
-					let bexpr = exprs[b];
-					let mut fits = true;
+			let mid: uint = sqrt((upper*upper + lower*lower) as float/2.0).round() as uint;
+			let mut workers = 2;
+			let mut new_exprs = ~[];
 
-					for i in range(0, numcnt) {
-						if (*aexpr).used[i] && (*bexpr).used[i] {
-							fits = false;
-							break;
-						}
-					}
+			{
+				let unsafe_h: *Helper = &h;
+				let chan_clone = chan.clone();
+				do spawn_with(lower) |lower| {
+					work(lower, mid, (*unsafe_h).exprs, &chan_clone);
+				}
 
-					if fits {
-						let mut hasroom = false;
-						for i in range(0, numcnt) {
-							if !(*aexpr).used[i] || !(*bexpr).used[i] {
-								hasroom = true;
-								break;
-							}
-						}
+				let chan_clone = chan.clone();
+				do spawn_with(upper) |upper| {
+					work(mid, upper, (*unsafe_h).exprs, &chan_clone);
+				}
 
-						if !solver.make(aexpr, bexpr, |expr| {
-							let mut ok = true;
-							if !uniq_exprs.contains(& &*expr) {
-								uniq_exprs.insert(&*expr);
-								if (*expr).value == target {
-									let wrapped = NumericHashedExpr { expr: expr };
-									if !uniq_solutions.contains(&wrapped) {
-										uniq_solutions.insert(wrapped);
-										ok = f(&*expr);
+				while workers > 0 {
+					let pair = port.recv();
+					match pair {
+						None => workers -= 1,
+						Some((hasroom, aexpr, bexpr)) => {
+							if !solver.make(aexpr, bexpr, |expr| {
+								let mut ok = true;
+								if !uniq_exprs.contains(& &*expr) {
+									uniq_exprs.insert(&*expr);
+									if (*expr).value == target {
+										let wrapped = NumericHashedExpr { expr: expr };
+										if !uniq_solutions.contains(&wrapped) {
+											uniq_solutions.insert(wrapped);
+											ok = f(&*expr);
+										}
+									}
+									else if hasroom {
+										new_exprs.push(expr);
 									}
 								}
-								else if hasroom {
-									exprs.push(expr);
-								}
-							}
 
-							ok
-						}) { return false; }
+								ok
+							}) {
+								// TODO: stop all tasks
+								return false;
+							}
+						}
 					}
 				}
 			}
 
+			for expr in new_exprs.iter() {
+				h.exprs.push(*expr);
+			}
+
 			lower = upper;
-			upper = exprs.len();
+			upper = h.exprs.len();
 		}
 	}
 
 	return true;
+}
+
+fn work (lower: uint, upper: uint, exprs: &[*Expr], chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
+	for b in range(lower,upper) {
+		for a in range(0,b) {
+			unsafe {
+				let aexpr  = exprs[a];
+				let bexpr  = exprs[b];
+				let numcnt = (*aexpr).used.len();
+				let mut fits = true;
+
+				for i in range(0, numcnt) {
+					if (*aexpr).used[i] && (*bexpr).used[i] {
+						fits = false;
+						break;
+					}
+				}
+	
+				if fits {
+					let mut hasroom = false;
+					for i in range(0, numcnt) {
+						if !(*aexpr).used[i] || !(*bexpr).used[i] {
+							hasroom = true;
+							break;
+						}
+					}
+	
+					chan.send(Some((hasroom, aexpr, bexpr)));
+				}
+			}
+		}
+	}
+	chan.send(None);
 }
 
 fn main() {
