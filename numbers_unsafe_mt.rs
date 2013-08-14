@@ -335,7 +335,6 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
 	let mut h = Helper { exprs: ~[] };
-	let mut uniq_exprs: HashSet<&Expr> = HashSet::new();
 	let mut uniq_solutions = HashSet::new();
 	quick_sort3(numbers);
 
@@ -344,13 +343,13 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 			let num = *numref;
 			let expr = solver.val(num,i);
 			let ptr: *Expr = &*expr;
-			uniq_exprs.insert(&*expr);
 			h.exprs.push(ptr);
 		}
 
 		for expr in h.exprs.iter() {
 			if (**expr).value == target {
 				yield!(&**expr);
+				break;
 			}
 		}
 
@@ -383,18 +382,15 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 						Some((hasroom, aexpr, bexpr)) => {
 							if !solver.make(aexpr, bexpr, |expr| {
 								let mut ok = true;
-								if !uniq_exprs.contains(& &*expr) {
-									uniq_exprs.insert(&*expr);
-									if (*expr).value == target {
-										let wrapped = NumericHashedExpr { expr: expr };
-										if !uniq_solutions.contains(&wrapped) {
-											uniq_solutions.insert(wrapped);
-											ok = f(&*expr);
-										}
+								if (*expr).value == target {
+									let wrapped = NumericHashedExpr { expr: expr };
+									if !uniq_solutions.contains(&wrapped) {
+										uniq_solutions.insert(wrapped);
+										ok = f(&*expr);
 									}
-									else if hasroom {
-										new_exprs.push(expr);
-									}
+								}
+								else if hasroom {
+									new_exprs.push(expr);
 								}
 
 								ok
