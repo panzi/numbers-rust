@@ -2,7 +2,6 @@ extern mod extra;
 
 use std::{uint,os};
 use std::hashmap::HashSet;
-use std::util::swap;
 use extra::sort::quick_sort3;
 
 enum Op {
@@ -163,277 +162,95 @@ impl ToStr for Expr {
 	}
 }
 
-fn split_add_sub(mut node: @Expr) -> (~[@Expr], ~[@Expr]) {
-	let mut adds = ~[];
-	let mut subs = ~[];
-
-	loop {
-		match node.op {
-			Add(left,right) => {
-				adds.push(right);
-				node = left;
-			},
-			Sub(left,right) => {
-				subs.push(right);
-				node = left;
-			},
-			_ => break
-		}
-	}
-	adds.push(node);
-
-	return (adds, subs);
-}
-
-fn split_mul_div(mut node: @Expr) -> (~[@Expr], ~[@Expr]) {
-	let mut muls = ~[];
-	let mut divs = ~[];
-
-	loop {
-		match node.op {
-			Mul(left,right) => {
-				muls.push(right);
-				node = left;
-			},
-			Div(left,right) => {
-				divs.push(right);
-				node = left;
-			},
-			_ => break
-		}
-	}
-	muls.push(node);
-
-	return (muls, divs);
-}
-
-// merge and reverse
-fn merge(mut left: ~[@Expr], mut right: ~[@Expr]) -> ~[@Expr] {
-	let n = left.len();
-	let m = right.len();
-
-	if n > 0 && m > 0 {
-		let mut lst = ~[];
-		let mut i = n - 1;
-		let mut j = m - 1;
-
-		loop {
-			let x = left[i];
-			let y = right[j];
-
-			if x.value <= y.value {
-				lst.push(x);
-				
-				if i == 0 {
-					loop {
-						lst.push(right[j]);
-						if j == 0 { break; }
-						j -= 1;
-					}
-					break;
-				}
-				i -= 1;
-			}
-			else {
-				lst.push(y);
-
-				if j == 0 {
-					loop {
-						lst.push(left[i]);
-						if i == 0 { break; }
-						i -= 1;
-					}
-					break;
-				}
-				j -= 1;
-			}
-		}
-
-		return lst;
-	}
-	else if n > 0 {
-		left.reverse();
-		return left;
-	}
-	else {
-		right.reverse();
-		return right;
-	}
-}
-
 #[inline]
 fn val(value: uint, index: uint) -> @Expr {
 	@Expr { op: Val(index), value: value, used: 1u64 << index }
 }
 
 #[inline]
-fn _add(left: @Expr, right: @Expr) -> @Expr {
+fn add(left: @Expr, right: @Expr) -> @Expr {
 	let used = left.used | right.used;
 	let value = left.value + right.value;
 	@Expr { op: Add(left, right), value: value, used: used }
 }
 
-#[inline]
-fn add(mut left: @Expr, mut right: @Expr) -> @Expr {
-	if left.value > right.value {
-		swap(&mut left, &mut right);
-	}
-
-	// don't run normalization algorithm if already normalized
+fn is_normalized_add(left: @Expr, right: @Expr) -> bool {
 	match right.op {
 		Add(_,_) => {},
 		Sub(_,_) => {},
 		_ => {
 			match left.op {
-				Add(_,lright) => {
-					if lright.value <= right.value {
-						return _add(left, right);
-					}
-				},
+				Add(_,lright) => return lright.value <= right.value,
 				Sub(_,_) => {},
-				_ => return _add(left, right)
+				_ => return left.value <= right.value
 			}
 		}
 	}
-
-	let (left_adds,  left_subs)  = split_add_sub(left);
-	let (right_adds, right_subs) = split_add_sub(right);
-
-	let adds = merge(left_adds, right_adds);
-	let subs = merge(left_subs, right_subs);
-	let mut node = adds[0];
-	for i in range(1,adds.len()) {
-		node = _add(node,adds[i]);
-	}
-	for right in subs.iter() {
-		node = _sub(node,*right);
-	}
-	return node;
+	return false;
 }
 
 #[inline]
-fn _sub(left: @Expr, right: @Expr) -> @Expr {
+fn sub(left: @Expr, right: @Expr) -> @Expr {
 	let used = left.used | right.used;
 	let value = left.value - right.value;
 	@Expr { op: Sub(left, right), value: value, used: used }
 }
 
-#[inline]
-fn sub(left: @Expr, right: @Expr) -> @Expr {
-	// don't run normalization algorithm if already normalized
+fn is_normalized_sub(left: @Expr, right: @Expr) -> bool {
 	match right.op {
 		Add(_,_) => {},
 		Sub(_,_) => {},
 		_ => {
 			match left.op {
-				Sub(_,lright) => {
-					if lright.value <= right.value {
-						return _sub(left, right);
-					}
-				},
-				_ => return _sub(left, right)
+				Sub(_,lright) => return lright.value <= right.value,
+				_ => return true
 			}
 		}
 	}
-
-	let (left_adds,  left_subs)  = split_add_sub(left);
-	let (right_subs, right_adds) = split_add_sub(right);
-
-	let adds = merge(left_adds, right_adds);
-	let subs = merge(left_subs, right_subs);
-	let mut node = adds[0];
-	for i in range(1,adds.len()) {
-		node = _add(node,adds[i]);
-	}
-	for right in subs.iter() {
-		node = _sub(node,*right);
-	}
-	return node;
+	return false;
 }
 
 #[inline]
-fn _mul(left: @Expr, right: @Expr) -> @Expr {
+fn mul(left: @Expr, right: @Expr) -> @Expr {
 	let used = left.used | right.used;
 	let value = left.value * right.value;
 	@Expr { op: Mul(left, right), value: value, used: used }
 }
 
-#[inline]
-fn mul(mut left: @Expr, mut right: @Expr) -> @Expr {
-	if left.value > right.value {
-		swap(&mut left, &mut right);
-	}
-
-	// don't run normalization algorithm if already normalized
+fn is_normalized_mul(left: @Expr, right: @Expr) -> bool {
 	match right.op {
 		Mul(_,_) => {},
 		Div(_,_) => {},
 		_ => {
 			match left.op {
-				Mul(_,lright) => {
-					if lright.value <= right.value {
-						return _mul(left, right);
-					}
-				},
+				Mul(_,lright) => return lright.value <= right.value,
 				Div(_,_) => {},
-				_ => return _mul(left, right)
+				_ => return left.value <= right.value
 			}
 		}
 	}
-
-	let (left_muls,  left_divs)  = split_mul_div(left);
-	let (right_muls, right_divs) = split_mul_div(right);
-
-	let muls = merge(left_muls, right_muls);
-	let divs = merge(left_divs, right_divs);
-	let mut node = muls[0];
-	for i in range(1,muls.len()) {
-		node = _mul(node,muls[i]);
-	}
-	for right in divs.iter() {
-		node = _div(node,*right);
-	}
-	return node;
+	return false;
 }
 
 #[inline]
-fn _div(left: @Expr, right: @Expr) -> @Expr {
+fn div(left: @Expr, right: @Expr) -> @Expr {
 	let used = left.used | right.used;
 	let value = left.value / right.value;
 	@Expr { op: Div(left, right), value: value, used: used }
 }
 
-#[inline]
-fn div(left: @Expr, right: @Expr) -> @Expr {
-	// don't run normalization algorithm if already normalized
+fn is_normalized_div(left: @Expr, right: @Expr) -> bool {
 	match right.op {
 		Mul(_,_) => {},
 		Div(_,_) => {},
 		_ => {
 			match left.op {
-				Div(_,lright) => {
-					if lright.value <= right.value {
-						return _div(left, right);
-					}
-				},
-				_ => return _div(left, right)
+				Div(_,lright) => return lright.value <= right.value,
+				_ => return true
 			}
 		}
 	}
-
-	let (left_muls,  left_divs)  = split_mul_div(left);
-	let (right_divs, right_muls) = split_mul_div(right);
-
-	let muls = merge(left_muls, right_muls);
-	let divs = merge(left_divs, right_divs);
-	let mut node = muls[0];
-	for i in range(1,muls.len()) {
-		node = _mul(node,muls[i]);
-	}
-	for right in divs.iter() {
-		node = _div(node,*right);
-	}
-	return node;
+	return false;
 }
 
 macro_rules! yield(
@@ -501,28 +318,47 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 }
 
 fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
-	yield!(add(a,b));
+	if is_normalized_add(a,b) {
+		yield!(add(a,b));
+	}
+	else if is_normalized_add(b,a) {
+		yield!(add(b,a));
+	}
 
 	if a.value != 1 && b.value != 1 {
-		yield!(mul(a,b));
+		if is_normalized_mul(a,b) {
+			yield!(mul(a,b));
+		}
+		else if is_normalized_mul(b,a) {
+			yield!(mul(b,a));
+		}
 	}
 
 	if a.value > b.value {
-		yield!(sub(a,b));
+		if is_normalized_sub(a,b) {
+			yield!(sub(a,b));
+		}
 
-		if b.value != 1 && a.value % b.value == 0 {
+		if b.value != 1 && a.value % b.value == 0 && is_normalized_div(a,b) {
 			yield!(div(a,b));
 		}
 	}
 	else if b.value > a.value {
-		yield!(sub(b,a));
+		if is_normalized_sub(b,a) {
+			yield!(sub(b,a));
+		}
 
-		if a.value != 1 && b.value % a.value == 0 {
+		if a.value != 1 && b.value % a.value == 0 && is_normalized_div(b,a) {
 			yield!(div(b,a));
 		}
 	}
 	else if b.value != 1 {
-		yield!(div(a,b));
+		if is_normalized_div(a,b) {
+			yield!(div(a,b));
+		}
+		else if is_normalized_div(b,a) {
+			yield!(div(b,a));
+		}
 	}
 
 	return true;
