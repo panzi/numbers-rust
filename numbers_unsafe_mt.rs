@@ -7,7 +7,7 @@ use std::task::spawn_with;
 use std::comm::SharedChan;
 use extra::sort::quick_sort3;
 
-macro_rules! yield(
+macro_rules! send(
 	($($arg:expr),*) => (if !f($($arg),*) { return false; })
 )
 
@@ -222,45 +222,45 @@ impl Solver {
 	
 	unsafe fn make(&mut self, a: *Expr, b: *Expr, f: &fn(*Expr) -> bool) -> bool {
 		if is_normalized_add(a,b) {
-			yield!(self.add(a,b));
+			send!(self.add(a,b));
 		}
 		else if is_normalized_add(b,a) {
-			yield!(self.add(a,b));
+			send!(self.add(a,b));
 		}
 
 		if (*a).value != 1 && (*b).value != 1 {
 			if is_normalized_mul(a,b) {
-				yield!(self.mul(a,b));
+				send!(self.mul(a,b));
 			}
 			else if is_normalized_mul(b,a) {
-				yield!(self.mul(b,a));
+				send!(self.mul(b,a));
 			}
 		}
 
 		if (*a).value > (*b).value {
 			if is_normalized_sub(a,b) {
-				yield!(self.sub(a,b));
+				send!(self.sub(a,b));
 			}
 
 			if (*b).value != 1 && (*a).value % (*b).value == 0 && is_normalized_div(a,b) {
-				yield!(self.div(a,b));
+				send!(self.div(a,b));
 			}
 		}
 		else if (*b).value > (*a).value {
 			if is_normalized_sub(b,a) {
-				yield!(self.sub(b,a));
+				send!(self.sub(b,a));
 			}
 
 			if (*a).value != 1 && (*b).value % (*a).value == 0 && is_normalized_div(b,a) {
-				yield!(self.div(b,a));
+				send!(self.div(b,a));
 			}
 		}
 		else if (*b).value != 1 {
 			if is_normalized_div(a,b) {
-				yield!(self.div(a,b));
+				send!(self.div(a,b));
 			}
 			else if is_normalized_div(b,a) {
-				yield!(self.div(b,a));
+				send!(self.div(b,a));
 			}
 		}
 
@@ -348,7 +348,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 
 		for expr in h.exprs.iter() {
 			if (**expr).value == target {
-				yield!(&**expr);
+				send!(&**expr);
 				break;
 			}
 		}

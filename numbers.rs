@@ -253,7 +253,7 @@ fn is_normalized_div(left: @Expr, right: @Expr) -> bool {
 	return false;
 }
 
-macro_rules! yield(
+macro_rules! send(
 	($($arg:expr),*) => (if !f($($arg),*) { return false; })
 )
 
@@ -271,7 +271,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 
 	for expr in exprs.iter() {
 		if expr.value == target {
-			yield!(*expr);
+			send!(*expr);
 			break;
 		}
 	}
@@ -315,45 +315,45 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 
 fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
 	if is_normalized_add(a,b) {
-		yield!(add(a,b));
+		send!(add(a,b));
 	}
 	else if is_normalized_add(b,a) {
-		yield!(add(b,a));
+		send!(add(b,a));
 	}
 
 	if a.value != 1 && b.value != 1 {
 		if is_normalized_mul(a,b) {
-			yield!(mul(a,b));
+			send!(mul(a,b));
 		}
 		else if is_normalized_mul(b,a) {
-			yield!(mul(b,a));
+			send!(mul(b,a));
 		}
 	}
 
 	if a.value > b.value {
 		if is_normalized_sub(a,b) {
-			yield!(sub(a,b));
+			send!(sub(a,b));
 		}
 
 		if b.value != 1 && a.value % b.value == 0 && is_normalized_div(a,b) {
-			yield!(div(a,b));
+			send!(div(a,b));
 		}
 	}
 	else if b.value > a.value {
 		if is_normalized_sub(b,a) {
-			yield!(sub(b,a));
+			send!(sub(b,a));
 		}
 
 		if a.value != 1 && b.value % a.value == 0 && is_normalized_div(b,a) {
-			yield!(div(b,a));
+			send!(div(b,a));
 		}
 	}
 	else if b.value != 1 {
 		if is_normalized_div(a,b) {
-			yield!(div(a,b));
+			send!(div(a,b));
 		}
 		else if is_normalized_div(b,a) {
-			yield!(div(b,a));
+			send!(div(b,a));
 		}
 	}
 
