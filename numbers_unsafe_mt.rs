@@ -417,10 +417,11 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 
 fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
+		let bexpr = exprs[b];
+
 		for a in range(0,b) {
 			unsafe {
 				let aexpr = exprs[a];
-				let bexpr = exprs[b];
 
 				if (*aexpr).used & (*bexpr).used == 0 {
 					let hasroom = ((*aexpr).used | (*bexpr).used) != full_usage;

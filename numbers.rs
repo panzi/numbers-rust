@@ -280,9 +280,10 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 	let mut upper = numcnt;
 	while lower < upper {
 		for b in range(lower,upper) {
+			let bexpr = exprs[b];
+
 			for a in range(0,b) {
 				let aexpr = exprs[a];
-				let bexpr = exprs[b];
 
 				if aexpr.used & bexpr.used == 0 {
 					let hasroom = (aexpr.used | bexpr.used) != full_usage;
