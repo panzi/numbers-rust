@@ -253,11 +253,7 @@ fn is_normalized_div(left: @Expr, right: @Expr) -> bool {
 	return false;
 }
 
-macro_rules! send(
-	($($arg:expr),*) => (if !f($($arg),*) { return false; })
-)
-
-fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool {
+fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr)) {
 	let numcnt = numbers.len();
 	let full_usage = !(!0u64 << numcnt);
 	let mut exprs = ~[];
@@ -271,7 +267,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 
 	for expr in exprs.iter() {
 		if expr.value == target {
-			send!(*expr);
+			f(*expr);
 			break;
 		}
 	}
@@ -288,21 +284,18 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 				if (aexpr.used & bexpr.used) == 0 {
 					let hasroom = (aexpr.used | bexpr.used) != full_usage;
 
-					if !make(aexpr, bexpr, |expr| {
-						let mut ok = true;
+					make(aexpr, bexpr, |expr| {
 						if expr.value == target {
 							let wrapped = NumericHashedExpr { expr: expr };
 							if !uniq_solutions.contains(&wrapped) {
 								uniq_solutions.insert(wrapped);
-								ok = f(expr);
+								f(expr);
 							}
 						}
 						else if hasroom {
 							exprs.push(expr);
 						}
-
-						ok
-					}) { return false; }
+					});
 				}
 			}
 		}
@@ -310,55 +303,51 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 		lower = upper;
 		upper = exprs.len();
 	}
-
-	return true;
 }
 
-fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
+fn make(a: @Expr, b: @Expr, f: &fn(@Expr)) {
 	if is_normalized_add(a,b) {
-		send!(add(a,b));
+		f(add(a,b));
 	}
 	else if is_normalized_add(b,a) {
-		send!(add(b,a));
+		f(add(b,a));
 	}
 
 	if a.value != 1 && b.value != 1 {
 		if is_normalized_mul(a,b) {
-			send!(mul(a,b));
+			f(mul(a,b));
 		}
 		else if is_normalized_mul(b,a) {
-			send!(mul(b,a));
+			f(mul(b,a));
 		}
 	}
 
 	if a.value > b.value {
 		if is_normalized_sub(a,b) {
-			send!(sub(a,b));
+			f(sub(a,b));
 		}
 
 		if b.value != 1 && (a.value % b.value) == 0 && is_normalized_div(a,b) {
-			send!(div(a,b));
+			f(div(a,b));
 		}
 	}
 	else if b.value > a.value {
 		if is_normalized_sub(b,a) {
-			send!(sub(b,a));
+			f(sub(b,a));
 		}
 
 		if a.value != 1 && (b.value % a.value) == 0 && is_normalized_div(b,a) {
-			send!(div(b,a));
+			f(div(b,a));
 		}
 	}
 	else if b.value != 1 {
 		if is_normalized_div(a,b) {
-			send!(div(a,b));
+			f(div(a,b));
 		}
 		else if is_normalized_div(b,a) {
-			send!(div(b,a));
+			f(div(b,a));
 		}
 	}
-
-	return true;
 }
 
 fn main() {
@@ -385,6 +374,5 @@ fn main() {
 	solutions(target, numbers, |expr| {
 		println(fmt!("%3d: %s", i, expr.to_str()));
 		i += 1;
-		true
 	});
 }

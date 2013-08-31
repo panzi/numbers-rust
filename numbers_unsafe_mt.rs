@@ -7,10 +7,6 @@ use std::task::spawn_with;
 use std::comm::SharedChan;
 use extra::sort::quick_sort3;
 
-macro_rules! send(
-	($($arg:expr),*) => (if !f($($arg),*) { return false; })
-)
-
 enum Op {
 	Add(*Expr,*Expr),
 	Sub(*Expr,*Expr),
@@ -220,51 +216,49 @@ impl Solver {
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make(&mut self, a: *Expr, b: *Expr, f: &fn(*Expr) -> bool) -> bool {
+	unsafe fn make(&mut self, a: *Expr, b: *Expr, f: &fn(*Expr)) {
 		if is_normalized_add(a,b) {
-			send!(self.add(a,b));
+			f(self.add(a,b));
 		}
 		else if is_normalized_add(b,a) {
-			send!(self.add(a,b));
+			f(self.add(a,b));
 		}
 
 		if (*a).value != 1 && (*b).value != 1 {
 			if is_normalized_mul(a,b) {
-				send!(self.mul(a,b));
+				f(self.mul(a,b));
 			}
 			else if is_normalized_mul(b,a) {
-				send!(self.mul(b,a));
+				f(self.mul(b,a));
 			}
 		}
 
 		if (*a).value > (*b).value {
 			if is_normalized_sub(a,b) {
-				send!(self.sub(a,b));
+				f(self.sub(a,b));
 			}
 
 			if (*b).value != 1 && ((*a).value % (*b).value) == 0 && is_normalized_div(a,b) {
-				send!(self.div(a,b));
+				f(self.div(a,b));
 			}
 		}
 		else if (*b).value > (*a).value {
 			if is_normalized_sub(b,a) {
-				send!(self.sub(b,a));
+				f(self.sub(b,a));
 			}
 
 			if (*a).value != 1 && ((*b).value % (*a).value) == 0 && is_normalized_div(b,a) {
-				send!(self.div(b,a));
+				f(self.div(b,a));
 			}
 		}
 		else if (*b).value != 1 {
 			if is_normalized_div(a,b) {
-				send!(self.div(a,b));
+				f(self.div(a,b));
 			}
 			else if is_normalized_div(b,a) {
-				send!(self.div(b,a));
+				f(self.div(b,a));
 			}
 		}
-
-		return true;
 	}
 }
 
@@ -326,7 +320,7 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	return false;
 }
 
-fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool {
+fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 	struct Helper {
 		exprs: ~[*Expr]
 	}
@@ -348,7 +342,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 
 		for expr in h.exprs.iter() {
 			if (**expr).value == target {
-				send!(&**expr);
+				f(&**expr);
 				break;
 			}
 		}
@@ -380,24 +374,18 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 					match pair {
 						None => workers -= 1,
 						Some((hasroom, aexpr, bexpr)) => {
-							if !solver.make(aexpr, bexpr, |expr| {
-								let mut ok = true;
+							solver.make(aexpr, bexpr, |expr| {
 								if (*expr).value == target {
 									let wrapped = NumericHashedExpr { expr: expr };
 									if !uniq_solutions.contains(&wrapped) {
 										uniq_solutions.insert(wrapped);
-										ok = f(&*expr);
+										f(&*expr);
 									}
 								}
 								else if hasroom {
 									new_exprs.push(expr);
 								}
-
-								ok
-							}) {
-								// TODO: stop all tasks
-								return false;
-							}
+							});
 						}
 					}
 				}
@@ -411,8 +399,6 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr) -> bool) -> bool 
 			upper = h.exprs.len();
 		}
 	}
-
-	return true;
 }
 
 fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
@@ -457,6 +443,5 @@ fn main () {
 	solutions(target, numbers, |expr| {
 		println(fmt!("%3d: %s", i, expr.to_str()));
 		i += 1;
-		true
 	});
 }
