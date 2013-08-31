@@ -285,7 +285,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr) -> bool) -> bool 
 			for a in range(0,b) {
 				let aexpr = exprs[a];
 
-				if aexpr.used & bexpr.used == 0 {
+				if (aexpr.used & bexpr.used) == 0 {
 					let hasroom = (aexpr.used | bexpr.used) != full_usage;
 
 					if !make(aexpr, bexpr, |expr| {
@@ -336,7 +336,7 @@ fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
 			send!(sub(a,b));
 		}
 
-		if b.value != 1 && a.value % b.value == 0 && is_normalized_div(a,b) {
+		if b.value != 1 && (a.value % b.value) == 0 && is_normalized_div(a,b) {
 			send!(div(a,b));
 		}
 	}
@@ -345,7 +345,7 @@ fn make(a: @Expr, b: @Expr, f: &fn(@Expr) -> bool) -> bool {
 			send!(sub(b,a));
 		}
 
-		if a.value != 1 && b.value % a.value == 0 && is_normalized_div(b,a) {
+		if a.value != 1 && (b.value % a.value) == 0 && is_normalized_div(b,a) {
 			send!(div(b,a));
 		}
 	}

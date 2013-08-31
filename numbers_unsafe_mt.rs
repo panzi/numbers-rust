@@ -242,7 +242,7 @@ impl Solver {
 				send!(self.sub(a,b));
 			}
 
-			if (*b).value != 1 && (*a).value % (*b).value == 0 && is_normalized_div(a,b) {
+			if (*b).value != 1 && ((*a).value % (*b).value) == 0 && is_normalized_div(a,b) {
 				send!(self.div(a,b));
 			}
 		}
@@ -251,7 +251,7 @@ impl Solver {
 				send!(self.sub(b,a));
 			}
 
-			if (*a).value != 1 && (*b).value % (*a).value == 0 && is_normalized_div(b,a) {
+			if (*a).value != 1 && ((*b).value % (*a).value) == 0 && is_normalized_div(b,a) {
 				send!(self.div(b,a));
 			}
 		}
@@ -423,7 +423,7 @@ fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Shar
 			unsafe {
 				let aexpr = exprs[a];
 
-				if (*aexpr).used & (*bexpr).used == 0 {
+				if ((*aexpr).used & (*bexpr).used) == 0 {
 					let hasroom = ((*aexpr).used | (*bexpr).used) != full_usage;
 					chan.send(Some((hasroom, aexpr, bexpr)));
 				}
