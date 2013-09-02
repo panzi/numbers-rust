@@ -18,18 +18,6 @@ struct Expr {
 	used: u64
 }
 
-struct NumericHashedExpr {
-	expr: @Expr
-}
-
-macro_rules! bin_numeric_iter_bytes(
-	($op:expr) => (
-		$op.iter_bytes(          lsb0, |buf| { f(buf) }) &&
-		left.numeric_iter_bytes( lsb0, |buf| { f(buf) }) &&
-		right.numeric_iter_bytes(lsb0, |buf| { f(buf) })
-	)
-)
-
 impl Expr {
 	fn precedence(&self) -> uint {
 		match self.op {
@@ -53,41 +41,6 @@ impl Expr {
 			return self.to_str();
 		}
 	}
-
-	fn numeric_iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
-		match self.op {
-			Add(left, right) => bin_numeric_iter_bytes!('+'),
-			Sub(left, right) => bin_numeric_iter_bytes!('-'),
-			Mul(left, right) => bin_numeric_iter_bytes!('*'),
-			Div(left, right) => bin_numeric_iter_bytes!('/'),
-			Val(_)           => self.value.iter_bytes(lsb0,f)
-		}
-	}
-	
-	fn numeric_eq(&self, other: &Expr) -> bool {
-		match self.op {
-			Add(left, right) => match other.op {
-				Add(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
-				_ => false
-			},
-			Sub(left, right) => match other.op {
-				Sub(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
-				_ => false
-			},
-			Mul(left, right) => match other.op {
-				Mul(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
-				_ => false
-			},
-			Div(left, right) => match other.op {
-				Div(oleft, oright) => left.numeric_eq(oleft) && right.numeric_eq(oright),
-				_ => false
-			},
-			Val(_) => match other.op {
-				Val(_) => self.value == other.value,
-				_ => false
-			}
-		}
-	}
 }
 
 macro_rules! bin_iter_bytes(
@@ -105,14 +58,8 @@ impl IterBytes for Expr {
 			Sub(left, right) => bin_iter_bytes!('-'),
 			Mul(left, right) => bin_iter_bytes!('*'),
 			Div(left, right) => bin_iter_bytes!('/'),
-			Val(index)       => index.iter_bytes(lsb0,f)
+			Val(_)           => self.value.iter_bytes(lsb0,f)
 		}
-	}
-}
-
-impl IterBytes for NumericHashedExpr {
-	fn iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
-		self.expr.numeric_iter_bytes(lsb0,f)
 	}
 }
 
@@ -135,17 +82,11 @@ impl Eq for Expr {
 				Div(oleft, oright) => left == oleft && right == oright,
 				_ => false
 			},
-			Val(index) => match other.op {
-				Val(oindex) => index == oindex,
+			Val(_) => match other.op {
+				Val(_) => self.value == other.value,
 				_ => false
 			}
 		}
-	}
-}
-
-impl Eq for NumericHashedExpr {
-	fn eq(&self, other: &NumericHashedExpr) -> bool {
-		self.expr.numeric_eq(other.expr)
 	}
 }
 
@@ -176,17 +117,15 @@ fn add(left: @Expr, right: @Expr) -> @Expr {
 
 fn is_normalized_add(left: @Expr, right: @Expr) -> bool {
 	match right.op {
-		Add(_,_) => {},
-		Sub(_,_) => {},
+		Add(_,_) | Sub(_,_) => return false,
 		_ => {
 			match left.op {
 				Add(_,lright) => return lright.value <= right.value,
-				Sub(_,_) => {},
+				Sub(_,_) => return false,
 				_ => return left.value <= right.value
 			}
 		}
 	}
-	return false;
 }
 
 #[inline]
@@ -198,8 +137,7 @@ fn sub(left: @Expr, right: @Expr) -> @Expr {
 
 fn is_normalized_sub(left: @Expr, right: @Expr) -> bool {
 	match right.op {
-		Add(_,_) => {},
-		Sub(_,_) => {},
+		Add(_,_) | Sub(_,_) => return false,
 		_ => {
 			match left.op {
 				Sub(_,lright) => return lright.value <= right.value,
@@ -207,7 +145,6 @@ fn is_normalized_sub(left: @Expr, right: @Expr) -> bool {
 			}
 		}
 	}
-	return false;
 }
 
 #[inline]
@@ -219,17 +156,15 @@ fn mul(left: @Expr, right: @Expr) -> @Expr {
 
 fn is_normalized_mul(left: @Expr, right: @Expr) -> bool {
 	match right.op {
-		Mul(_,_) => {},
-		Div(_,_) => {},
+		Mul(_,_) | Div(_,_) => return false,
 		_ => {
 			match left.op {
 				Mul(_,lright) => return lright.value <= right.value,
-				Div(_,_) => {},
+				Div(_,_) => return false,
 				_ => return left.value <= right.value
 			}
 		}
 	}
-	return false;
 }
 
 #[inline]
@@ -241,8 +176,7 @@ fn div(left: @Expr, right: @Expr) -> @Expr {
 
 fn is_normalized_div(left: @Expr, right: @Expr) -> bool {
 	match right.op {
-		Mul(_,_) => {},
-		Div(_,_) => {},
+		Mul(_,_) | Div(_,_) => return false,
 		_ => {
 			match left.op {
 				Div(_,lright) => return lright.value <= right.value,
@@ -250,7 +184,6 @@ fn is_normalized_div(left: @Expr, right: @Expr) -> bool {
 			}
 		}
 	}
-	return false;
 }
 
 fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr)) {
@@ -286,9 +219,8 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(@Expr)) {
 
 					make(aexpr, bexpr, |expr| {
 						if expr.value == target {
-							let wrapped = NumericHashedExpr { expr: expr };
-							if !uniq_solutions.contains(&wrapped) {
-								uniq_solutions.insert(wrapped);
+							if !uniq_solutions.contains(&expr) {
+								uniq_solutions.insert(expr);
 								f(expr);
 							}
 						}
