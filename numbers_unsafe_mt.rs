@@ -7,6 +7,16 @@ use std::task::spawn_with;
 use std::comm::SharedChan;
 use extra::sort::quick_sort3;
 
+static HAS_ROOM: uint = 1 << 0;
+static ADD_A_B:  uint = 1 << 1;
+static ADD_B_A:  uint = 1 << 2;
+static SUB_A_B:  uint = 1 << 3;
+static SUB_B_A:  uint = 1 << 4;
+static MUL_A_B:  uint = 1 << 5;
+static MUL_B_A:  uint = 1 << 6;
+static DIV_A_B:  uint = 1 << 7;
+static DIV_B_A:  uint = 1 << 8;
+
 enum Op {
 	Add(*Expr,*Expr),
 	Sub(*Expr,*Expr),
@@ -216,50 +226,84 @@ impl Solver {
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make(&mut self, a: *Expr, b: *Expr, f: &fn(*Expr)) {
-		if is_normalized_add(a,b) {
+	unsafe fn make(&mut self, what: uint, a: *Expr, b: *Expr, f: &fn(*Expr)) {
+		if (what & ADD_A_B) != 0 {
 			f(self.add(a,b));
 		}
-		else if is_normalized_add(b,a) {
+		else if (what & ADD_B_A) != 0 {
 			f(self.add(a,b));
 		}
 
-		if (*a).value != 1 && (*b).value != 1 {
-			if is_normalized_mul(a,b) {
-				f(self.mul(a,b));
-			}
-			else if is_normalized_mul(b,a) {
-				f(self.mul(b,a));
-			}
+		if (what & MUL_A_B) != 0 {
+			f(self.mul(a,b));
+		}
+		else if (what & MUL_B_A) != 0 {
+			f(self.mul(b,a));
 		}
 
-		if (*a).value > (*b).value {
-			if is_normalized_sub(a,b) {
-				f(self.sub(a,b));
-			}
-
-			if (*b).value != 1 && ((*a).value % (*b).value) == 0 && is_normalized_div(a,b) {
-				f(self.div(a,b));
-			}
+		if (what & SUB_A_B) != 0 {
+			f(self.sub(a,b));
 		}
-		else if (*b).value > (*a).value {
-			if is_normalized_sub(b,a) {
-				f(self.sub(b,a));
-			}
-
-			if (*a).value != 1 && ((*b).value % (*a).value) == 0 && is_normalized_div(b,a) {
-				f(self.div(b,a));
-			}
+		else if (what & SUB_B_A) != 0 {
+			f(self.sub(b,a));
 		}
-		else if (*b).value != 1 {
-			if is_normalized_div(a,b) {
-				f(self.div(a,b));
-			}
-			else if is_normalized_div(b,a) {
-				f(self.div(b,a));
-			}
+
+		if (what & DIV_A_B) != 0 {
+			f(self.div(a,b));
+		}
+		else if (what & DIV_B_A) != 0 {
+			f(self.div(b,a));
 		}
 	}
+}
+
+unsafe fn make(a: *Expr, b: *Expr) -> uint {
+	let mut what = 0;
+
+	if is_normalized_add(a,b) {
+		what = ADD_A_B;
+	}
+	else if is_normalized_add(b,a) {
+		what = ADD_B_A;
+	}
+
+	if (*a).value != 1 && (*b).value != 1 {
+		if is_normalized_mul(a,b) {
+			what |= MUL_A_B;
+		}
+		else if is_normalized_mul(b,a) {
+			what |= MUL_B_A;
+		}
+	}
+
+	if (*a).value > (*b).value {
+		if is_normalized_sub(a,b) {
+			what |= SUB_A_B;
+		}
+
+		if (*b).value != 1 && ((*a).value % (*b).value) == 0 && is_normalized_div(a,b) {
+			what |= DIV_A_B;
+		}
+	}
+	else if (*b).value > (*a).value {
+		if is_normalized_sub(b,a) {
+			what |= SUB_B_A;
+		}
+
+		if (*a).value != 1 && ((*b).value % (*a).value) == 0 && is_normalized_div(b,a) {
+			what |= DIV_B_A;
+		}
+	}
+	else if (*b).value != 1 {
+		if is_normalized_div(a,b) {
+			what |= DIV_A_B;
+		}
+		else if is_normalized_div(b,a) {
+			what |= DIV_B_A;
+		}
+	}
+
+	return what;
 }
 
 unsafe fn is_normalized_add(left: *Expr, right: *Expr) -> bool {
@@ -373,8 +417,8 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 					let pair = port.recv();
 					match pair {
 						None => workers -= 1,
-						Some((hasroom, aexpr, bexpr)) => {
-							solver.make(aexpr, bexpr, |expr| {
+						Some((flags, aexpr, bexpr)) => {
+							solver.make(flags, aexpr, bexpr, |expr| {
 								if (*expr).value == target {
 									let wrapped = NumericHashedExpr { expr: expr };
 									if !uniq_solutions.contains(&wrapped) {
@@ -382,7 +426,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 										f(&*expr);
 									}
 								}
-								else if hasroom {
+								else if (flags & HAS_ROOM) != 0 {
 									new_exprs.push(expr);
 								}
 							});
@@ -401,7 +445,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(bool,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(uint,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
 		let bexpr = exprs[b];
 
@@ -410,8 +454,13 @@ fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Shar
 				let aexpr = exprs[a];
 
 				if ((*aexpr).used & (*bexpr).used) == 0 {
-					let hasroom = ((*aexpr).used | (*bexpr).used) != full_usage;
-					chan.send(Some((hasroom, aexpr, bexpr)));
+					let mut flags = make(aexpr,bexpr);
+					if (flags != 0) {
+						if ((*aexpr).used | (*bexpr).used) != full_usage {
+							flags |= HAS_ROOM;
+						}
+						chan.send(Some((flags, aexpr, bexpr)));
+					}
 				}
 			}
 		}
