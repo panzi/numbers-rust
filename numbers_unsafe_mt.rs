@@ -1,11 +1,11 @@
+#[feature(macro_rules)];
+
 extern mod extra;
 
-use std::{uint,os};
+use std::os;
 use std::hashmap::HashSet;
 use std::num::sqrt;
-use std::task::spawn_with;
 use std::comm::SharedChan;
-use extra::sort::quick_sort3;
 
 static HAS_ROOM: uint = 1 << 0;
 static ADD_A_B:  uint = 1 << 1;
@@ -57,10 +57,10 @@ impl Expr {
 	fn to_str_under(&self,precedence: uint) -> ~str {
 //		match self.op {
 //			Val(_) => self.value.to_str(),
-//			_      => fmt!("(%s)", self.to_str())
+//			_      => format!("({})", self.to_str())
 //		}
 		if (precedence > self.precedence()) {
-			return fmt!("(%s)", self.to_str());
+			return format!("({})", self.to_str());
 		}
 		else {
 			return self.to_str();
@@ -119,10 +119,10 @@ impl ToStr for Expr {
 	fn to_str(&self) -> ~str {
 		let p = self.precedence();
 		match self.op {
-			Add(left, right) => unsafe { fmt!("%s + %s", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Sub(left, right) => unsafe { fmt!("%s - %s", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Mul(left, right) => unsafe { fmt!("%s * %s", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Div(left, right) => unsafe { fmt!("%s / %s", (*left).to_str_under(p), (*right).to_str_under(p)) },
+			Add(left, right) => unsafe { format!("{} + {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
+			Sub(left, right) => unsafe { format!("{} - {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
+			Mul(left, right) => unsafe { format!("{} * {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
+			Div(left, right) => unsafe { format!("{} / {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
 			Val(_)           => self.value.to_str()
 		}
 	}
@@ -175,7 +175,7 @@ impl Solver {
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make(&mut self, what: uint, a: *Expr, b: *Expr, f: &fn(*Expr)) {
+	unsafe fn make(&mut self, what: uint, a: *Expr, b: *Expr, f: |*Expr|) {
 		if (what & ADD_A_B) != 0 {
 			f(self.add(a,b));
 		}
@@ -305,7 +305,7 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
+fn solutions(target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	struct Helper {
 		exprs: ~[*Expr]
 	}
@@ -315,7 +315,7 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 	let mut solver = Solver::new();
 	let mut h = Helper { exprs: ~[] };
 	let mut uniq_solutions = HashSet::new();
-	quick_sort3(numbers);
+	numbers.sort();
 
 	unsafe {
 		for (i, numref) in numbers.iter().enumerate() {
@@ -334,24 +334,26 @@ fn solutions(target: uint, mut numbers: ~[uint], f: &fn(&Expr)) {
 
 		let mut lower = 0;
 		let mut upper = numcnt;
-		let (port, chan) = stream();
-		let chan = SharedChan::new(chan);
+		let (port, chan) = SharedChan::new();
 
 		while lower < upper {
-			let mid: uint = sqrt((upper*upper + lower*lower) as float/2.0).round() as uint;
+			let mid: uint = sqrt((upper*upper + lower*lower) as f64/2.0).round() as uint;
 			let mut workers = 2;
 			let mut new_exprs = ~[];
+			let l = lower;
+			let u = upper;
 
 			{
 				let unsafe_h: *Helper = &h;
 				let chan_clone = chan.clone();
-				do spawn_with(lower) |lower| {
-					work(lower, mid, (*unsafe_h).exprs, full_usage, &chan_clone);
+
+				do spawn {
+					work(l, mid, (*unsafe_h).exprs, full_usage, &chan_clone);
 				}
 
 				let chan_clone = chan.clone();
-				do spawn_with(upper) |upper| {
-					work(mid, upper, (*unsafe_h).exprs, full_usage, &chan_clone);
+				do spawn {
+					work(mid, u, (*unsafe_h).exprs, full_usage, &chan_clone);
 				}
 
 				while workers > 0 {
@@ -413,24 +415,24 @@ fn main () {
 	if args.len() < 3 {
 		fail!("not enough arguments");
 	}
-	let target = uint::from_str(args[1]).expect("target is not a number");
+	let target = from_str(args[1]).expect("target is not a number");
 	let mut numbers = args.slice(2,args.len()).map(|arg| {
-		let num = uint::from_str(*arg).expect(fmt!("argument is not a number: %s",*arg));
-		if num == 0 { fail!(fmt!("illegal argument value: %s",*arg)); }
+		let num:uint = from_str(*arg).expect(format!("argument is not a number: {}",*arg));
+		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
 		num
 	});
 	if (numbers.len() > 64) {
 		fail!("only up to 64 numbers supported");
 	}
-	quick_sort3(numbers);
+	numbers.sort();
 
-	println(fmt!("target  = %u", target));
-	println(fmt!("numbers = [%s]", numbers.map(|num| num.to_str()).connect(", ")));
+	println(format!("target  = {}", target));
+	println(format!("numbers = [{}]", numbers.map(|num| num.to_str()).connect(", ")));
 
 	println("solutions:");
 	let mut i = 1;
 	solutions(target, numbers, |expr| {
-		println(fmt!("%3d: %s", i, expr.to_str()));
+		println(format!("{:3d}: {}", i, expr.to_str()));
 		i += 1;
 	});
 }
