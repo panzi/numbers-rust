@@ -428,10 +428,10 @@ fn main () {
 	if args.len() < 4 {
 		fail!("not enough arguments");
 	}
-	let tasks:u32 = from_str(args[1]).expect("number of tasks is not a number");
-	let target:uint = from_str(args[2]).expect("target is not a number");
+	let tasks:u32 = from_str(args[1]).expect("number of tasks is not a number or out of range");
+	let target:uint = from_str(args[2]).expect("target is not a number or out of range");
 	let mut numbers = args.slice(3,args.len()).map(|arg| {
-		let num:uint = from_str(*arg).expect(format!("argument is not a number: {}",*arg));
+		let num:uint = from_str(*arg).expect(format!("argument is not a number or out of range: {}",*arg));
 		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
 		num
 	});
