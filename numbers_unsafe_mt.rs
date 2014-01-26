@@ -6,6 +6,7 @@ use std::os;
 use std::hashmap::HashSet;
 use std::num::sqrt;
 use std::comm::SharedChan;
+use std::uint;
 
 static HAS_ROOM: uint = 1 << 0;
 static ADD_A_B:  uint = 1 << 1;
@@ -305,7 +306,7 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-fn solutions(tasks: uint, target: uint, mut numbers: ~[uint], f: |&Expr|) {
+fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	struct Helper {
 		exprs: ~[*Expr]
 	}
@@ -427,7 +428,7 @@ fn main () {
 	if args.len() < 4 {
 		fail!("not enough arguments");
 	}
-	let tasks:uint = from_str(args[1]).expect("number of tasks is not a number");
+	let tasks:u32 = from_str(args[1]).expect("number of tasks is not a number");
 	let target:uint = from_str(args[2]).expect("target is not a number");
 	let mut numbers = args.slice(3,args.len()).map(|arg| {
 		let num:uint = from_str(*arg).expect(format!("argument is not a number: {}",*arg));
@@ -437,11 +438,8 @@ fn main () {
 	if tasks == 0 {
 		fail!("number of tasks has to be >= 1");
 	}
-	if tasks > 0x7fffffff {
-		fail!("number of tasks has to be <= {}", 0x7fffffff);
-	}
-	if numbers.len() > 64 {
-		fail!("only up to 64 numbers supported");
+	if numbers.len() > uint::bits {
+		fail!("only up to {} numbers supported", uint::bits);
 	}
 	numbers.sort();
 
