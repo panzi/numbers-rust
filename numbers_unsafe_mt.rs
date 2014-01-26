@@ -305,7 +305,7 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-fn solutions(target: uint, mut numbers: ~[uint], f: |&Expr|) {
+fn solutions(tasks: uint, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	struct Helper {
 		exprs: ~[*Expr]
 	}
@@ -337,23 +337,35 @@ fn solutions(target: uint, mut numbers: ~[uint], f: |&Expr|) {
 		let (port, chan) = SharedChan::new();
 
 		while lower < upper {
-			let mid: uint = sqrt((upper*upper + lower*lower) as f64/2.0).round() as uint;
-			let mut workers = 2;
+			let mut workers = 0;
 			let mut new_exprs = ~[];
-			let l = lower;
-			let u = upper;
+			let x0 = lower;
+			let xn = upper;
+			let mut x_last = x0;
+			let mut i = 1;
+			let x0_sq = x0*x0;
+			let A = (xn*xn - x0_sq) as f64 / tasks as f64;
 
 			{
 				let unsafe_h: *Helper = &h;
-				let chan_clone = chan.clone();
 
-				do spawn {
-					work(l, mid, (*unsafe_h).exprs, full_usage, &chan_clone);
-				}
+				while x_last < xn || workers == 0 {
+					let xi = sqrt(i as f64 * A + x0_sq as f64).round() as uint;
+					let xi = if xi > xn { xn } else { xi };
 
-				let chan_clone = chan.clone();
-				do spawn {
-					work(mid, u, (*unsafe_h).exprs, full_usage, &chan_clone);
+					if xi > x_last {
+						let xim1 = x_last;
+						let chan_clone = chan.clone();
+
+						do spawn {
+							work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone);
+						}
+
+						x_last = xi;
+						workers += 1;
+					}
+
+					i += 1;
 				}
 
 				while workers > 0 {
@@ -412,16 +424,23 @@ fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Shar
 
 fn main () {
 	let args = os::args();
-	if args.len() < 3 {
+	if args.len() < 4 {
 		fail!("not enough arguments");
 	}
-	let target = from_str(args[1]).expect("target is not a number");
-	let mut numbers = args.slice(2,args.len()).map(|arg| {
+	let tasks:uint = from_str(args[1]).expect("number of tasks is not a number");
+	let target:uint = from_str(args[2]).expect("target is not a number");
+	let mut numbers = args.slice(3,args.len()).map(|arg| {
 		let num:uint = from_str(*arg).expect(format!("argument is not a number: {}",*arg));
 		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
 		num
 	});
-	if (numbers.len() > 64) {
+	if tasks == 0 {
+		fail!("number of tasks has to be >= 1");
+	}
+	if tasks > 0x7fffffff {
+		fail!("number of tasks has to be <= {}", 0x7fffffff);
+	}
+	if numbers.len() > 64 {
 		fail!("only up to 64 numbers supported");
 	}
 	numbers.sort();
@@ -431,7 +450,7 @@ fn main () {
 
 	println("solutions:");
 	let mut i = 1;
-	solutions(target, numbers, |expr| {
+	solutions(tasks, target, numbers, |expr| {
 		println(format!("{:3d}: {}", i, expr.to_str()));
 		i += 1;
 	});
