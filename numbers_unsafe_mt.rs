@@ -356,9 +356,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 						let xim1 = x_last;
 						let chan_clone = chan.clone();
 
-						spawn(proc() {
-							work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone);
-						});
+						spawn(proc() work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone));
 
 						x_last = xi;
 						workers += 1;
