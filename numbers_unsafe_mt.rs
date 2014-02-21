@@ -1,11 +1,9 @@
 #[feature(macro_rules)];
 
-extern mod extra;
-
 use std::os;
 use std::hashmap::HashSet;
 use std::num::sqrt;
-use std::comm::SharedChan;
+use std::comm::Chan;
 use std::uint;
 
 static HAS_ROOM: uint = 1 << 0;
@@ -27,13 +25,13 @@ enum Op {
 }
 
 struct Expr {
-	priv op: Op,
-	priv value: uint,
-	priv used: u64
+	op: Op,
+	value: uint,
+	used: u64
 }
 
 struct Solver {
-	priv exprs: ~[~Expr]
+	exprs: ~[~Expr]
 }
 
 macro_rules! bin_numeric_iter_bytes(
@@ -60,7 +58,7 @@ impl Expr {
 //			Val(_) => self.value.to_str(),
 //			_      => format!("({})", self.to_str())
 //		}
-		if (precedence > self.precedence()) {
+		if precedence > self.precedence() {
 			return format!("({})", self.to_str());
 		}
 		else {
@@ -335,7 +333,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 
 		let mut lower = 0;
 		let mut upper = numcnt;
-		let (port, chan) = SharedChan::new();
+		let (port, chan) = Chan::new();
 
 		while lower < upper {
 			let mut workers = 0;
@@ -358,9 +356,9 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 						let xim1 = x_last;
 						let chan_clone = chan.clone();
 
-						do spawn {
+						spawn(proc() {
 							work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone);
-						}
+						});
 
 						x_last = xi;
 						workers += 1;
@@ -400,7 +398,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &SharedChan<Option<(uint,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Chan<Option<(uint,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
 		let bexpr = exprs[b];
 
@@ -410,7 +408,7 @@ fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Shar
 
 				if ((*aexpr).used & (*bexpr).used) == 0 {
 					let mut flags = make(aexpr,bexpr);
-					if (flags != 0) {
+					if flags != 0 {
 						if ((*aexpr).used | (*bexpr).used) != full_usage {
 							flags |= HAS_ROOM;
 						}
@@ -438,18 +436,18 @@ fn main () {
 	if tasks == 0 {
 		fail!("number of tasks has to be >= 1");
 	}
-	if numbers.len() > uint::bits {
-		fail!("only up to {} numbers supported", uint::bits);
+	if numbers.len() > uint::BITS {
+		fail!("only up to {} numbers supported", uint::BITS);
 	}
 	numbers.sort();
 
-	println(format!("target  = {}", target));
-	println(format!("numbers = [{}]", numbers.map(|num| num.to_str()).connect(", ")));
+	println!("target  = {}", target);
+	println!("numbers = [{}]", numbers.map(|num| num.to_str()).connect(", "));
 
-	println("solutions:");
+	println!("solutions:");
 	let mut i = 1;
 	solutions(tasks, target, numbers, |expr| {
-		println(format!("{:3d}: {}", i, expr.to_str()));
+		println!("{:3d}: {}", i, expr.to_str());
 		i += 1;
 	});
 }
