@@ -1,10 +1,17 @@
 #[feature(macro_rules)];
+#[feature(default_type_params)];
+
+extern crate collections;
 
 use std::os;
-use std::hashmap::HashSet;
+use std::io::Writer;
 use std::num::sqrt;
-use std::comm::Chan;
+use std::hash::Hash;
+use std::comm::{channel, Sender};
 use std::uint;
+use std::fmt::{Show, Formatter};
+
+use collections::HashSet;
 
 static HAS_ROOM: uint = 1 << 0;
 static ADD_A_B:  uint = 1 << 1;
@@ -34,14 +41,6 @@ struct Solver {
 	exprs: ~[~Expr]
 }
 
-macro_rules! bin_numeric_iter_bytes(
-	($op:expr) => (unsafe {
-		$op.iter_bytes(             lsb0, |buf| { f(buf) }) &&
-		(*left).numeric_iter_bytes( lsb0, |buf| { f(buf) }) &&
-		(*right).numeric_iter_bytes(lsb0, |buf| { f(buf) })
-	})
-)
-
 impl Expr {
 	fn precedence(&self) -> uint {
 		match self.op {
@@ -52,37 +51,36 @@ impl Expr {
 			Val(_)   => 4
 		}
 	}
-	
-	fn to_str_under(&self,precedence: uint) -> ~str {
-//		match self.op {
-//			Val(_) => self.value.to_str(),
-//			_      => format!("({})", self.to_str())
-//		}
-		if precedence > self.precedence() {
-			return format!("({})", self.to_str());
-		}
-		else {
-			return self.to_str();
-		}
-	}
 }
 
-macro_rules! bin_iter_bytes(
-	($op:expr) => (unsafe {
-		$op.iter_bytes(     lsb0, |buf| { f(buf) }) &&
-		(*left).iter_bytes( lsb0, |buf| { f(buf) }) &&
-		(*right).iter_bytes(lsb0, |buf| { f(buf) })
-	})
-)
-
-impl IterBytes for Expr {
-	fn iter_bytes(&self, lsb0: bool, f: std::to_bytes::Cb) -> bool {
+impl<S: Writer> Hash<S> for Expr {
+	#[inline]
+	fn hash(&self, state: &mut S) {
 		match self.op {
-			Add(left, right) => bin_iter_bytes!('+'),
-			Sub(left, right) => bin_iter_bytes!('-'),
-			Mul(left, right) => bin_iter_bytes!('*'),
-			Div(left, right) => bin_iter_bytes!('/'),
-			Val(_)           => self.value.iter_bytes(lsb0,f)
+			Add(left, right) => unsafe {
+				state.write_u8('+' as u8);
+				(*left).hash(state);
+				(*right).hash(state);
+			},
+			Sub(left, right) => unsafe {
+				state.write_u8('-' as u8);
+				(*left).hash(state);
+				(*right).hash(state);
+			},
+			Mul(left, right) => unsafe {
+				state.write_u8('*' as u8);
+				(*left).hash(state);
+				(*right).hash(state);
+			},
+			Div(left, right) => unsafe {
+				state.write_u8('/' as u8);
+				(*left).hash(state);
+				(*right).hash(state);
+			},
+			Val(_) => {
+				state.write_u8('#' as u8);
+				state.write_uint(self.value);
+			}
 		}
 	}
 }
@@ -114,15 +112,49 @@ impl Eq for Expr {
 	}
 }
 
-impl ToStr for Expr {
-	fn to_str(&self) -> ~str {
-		let p = self.precedence();
+macro_rules! fmt_expr(
+	($f:expr, $expr:expr, $op:expr, $left:expr, $right:expr) => ({
+		let p = $expr.precedence();
+		let lp = ($left).precedence();
+		let rp = ($right).precedence();
+
+		if p > lp {
+			if p > rp {
+				write!($f.buf, "({}) {} ({})", $left, $op, $right)
+			}
+			else {
+				write!($f.buf, "({}) {} {}", $left, $op, $right)
+			}
+		}
+		else {
+			if p > rp {
+				write!($f.buf, "{} {} ({})", $left, $op, $right)
+			}
+			else {
+				write!($f.buf, "{} {} {}", $left, $op, $right)
+			}
+		}
+	})
+)
+
+impl Show for Expr {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		match self.op {
-			Add(left, right) => unsafe { format!("{} + {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Sub(left, right) => unsafe { format!("{} - {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Mul(left, right) => unsafe { format!("{} * {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Div(left, right) => unsafe { format!("{} / {}", (*left).to_str_under(p), (*right).to_str_under(p)) },
-			Val(_)           => self.value.to_str()
+			Add(left, right) => unsafe {
+				fmt_expr!(f, self, '+', *left, *right)
+			},
+			Sub(left, right) => unsafe {
+				fmt_expr!(f, self, '-', *left, *right)
+			},
+			Mul(left, right) => unsafe {
+				fmt_expr!(f, self, '*', *left, *right)
+			},
+			Div(left, right) => unsafe {
+				fmt_expr!(f, self, '/', *left, *right)
+			},
+			Val(_) => {
+				write!(f.buf, "{}", self.value)
+			}
 		}
 	}
 }
@@ -333,7 +365,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 
 		let mut lower = 0;
 		let mut upper = numcnt;
-		let (port, chan) = Chan::new();
+		let (chan, port) = channel();
 
 		while lower < upper {
 			let mut workers = 0;
@@ -343,13 +375,13 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 			let mut x_last = x0;
 			let mut i = 1;
 			let x0_sq = x0*x0;
-			let A = (xn*xn - x0_sq) as f64 / tasks as f64;
+			let area = (xn*xn - x0_sq) as f64 / tasks as f64;
 
 			{
 				let unsafe_h: *Helper = &h;
 
 				while x_last < xn || workers == 0 {
-					let xi = sqrt(i as f64 * A + x0_sq as f64).round() as uint;
+					let xi = sqrt(i as f64 * area + x0_sq as f64).round() as uint;
 					let xi = if xi > xn { xn } else { xi };
 
 					if xi > x_last {
@@ -396,7 +428,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Chan<Option<(uint,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Sender<Option<(uint,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
 		let bexpr = exprs[b];
 
@@ -445,7 +477,7 @@ fn main () {
 	println!("solutions:");
 	let mut i = 1;
 	solutions(tasks, target, numbers, |expr| {
-		println!("{:3d}: {}", i, expr.to_str());
+		println!("{:3d}: {}", i, expr);
 		i += 1;
 	});
 }
