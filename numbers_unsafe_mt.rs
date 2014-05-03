@@ -1,11 +1,10 @@
-#[feature(macro_rules)];
-#[feature(default_type_params)];
+#![feature(macro_rules)]
+#![feature(default_type_params)]
 
 extern crate collections;
 
 use std::os;
 use std::io::Writer;
-use std::num::sqrt;
 use std::hash::Hash;
 use std::comm::{channel, Sender};
 use std::uint;
@@ -38,7 +37,7 @@ struct Expr {
 }
 
 struct Solver {
-	exprs: ~[~Expr]
+	exprs: ~Vec<~Expr>
 }
 
 impl Expr {
@@ -53,33 +52,42 @@ impl Expr {
 	}
 }
 
+macro_rules! tryio(
+	($res:expr) => (
+		match $res {
+			Ok(_) => {},
+			Err(msg) => fail!(msg)
+		}
+	);
+)
+
 impl<S: Writer> Hash<S> for Expr {
 	#[inline]
 	fn hash(&self, state: &mut S) {
 		match self.op {
 			Add(left, right) => unsafe {
-				state.write_u8('+' as u8);
+				tryio!(state.write_u8('+' as u8));
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Sub(left, right) => unsafe {
-				state.write_u8('-' as u8);
+				tryio!(state.write_u8('-' as u8));
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Mul(left, right) => unsafe {
-				state.write_u8('*' as u8);
+				tryio!(state.write_u8('*' as u8));
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Div(left, right) => unsafe {
-				state.write_u8('/' as u8);
+				tryio!(state.write_u8('/' as u8));
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Val(_) => {
-				state.write_u8('#' as u8);
-				state.write_uint(self.value);
+				tryio!(state.write_u8('#' as u8));
+				tryio!(state.write_uint(self.value));
 			}
 		}
 	}
@@ -111,6 +119,8 @@ impl Eq for Expr {
 		}
 	}
 }
+
+impl TotalEq for Expr {}
 
 macro_rules! fmt_expr(
 	($f:expr, $expr:expr, $op:expr, $left:expr, $right:expr) => ({
@@ -162,7 +172,7 @@ impl Show for Expr {
 impl Solver {
 	#[inline]
 	fn new() -> Solver {
-		Solver { exprs: ~[] }
+		Solver { exprs: ~Vec::new() }
 	}
 
 	#[inline]
@@ -336,15 +346,15 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
+fn solutions(tasks: u32, target: uint, mut numbers: ~Vec<uint>, f: |&Expr|) {
 	struct Helper {
-		exprs: ~[*Expr]
+		exprs: ~Vec<*Expr>
 	}
 
 	let numcnt = numbers.len();
 	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
-	let mut h = Helper { exprs: ~[] };
+	let mut h = Helper { exprs: ~Vec::new() };
 	let mut uniq_solutions = HashSet::new();
 	numbers.sort();
 
@@ -369,7 +379,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 
 		while lower < upper {
 			let mut workers = 0;
-			let mut new_exprs = ~[];
+			let mut new_exprs = Vec::new();
 			let x0 = lower;
 			let xn = upper;
 			let mut x_last = x0;
@@ -381,7 +391,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 				let unsafe_h: *Helper = &h;
 
 				while x_last < xn || workers == 0 {
-					let xi = sqrt(i as f64 * area + x0_sq as f64).round() as uint;
+					let xi = (i as f64 * area + x0_sq as f64).sqrt().round() as uint;
 					let xi = if xi > xn { xn } else { xi };
 
 					if xi > x_last {
@@ -428,13 +438,13 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~[uint], f: |&Expr|) {
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &[*Expr], full_usage: u64, chan: &Sender<Option<(uint,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &Vec<*Expr>, full_usage: u64, chan: &Sender<Option<(uint,*Expr,*Expr)>>) {
 	for b in range(lower,upper) {
-		let bexpr = exprs[b];
+		let bexpr = *exprs.get(b);
 
 		for a in range(0,b) {
 			unsafe {
-				let aexpr = exprs[a];
+				let aexpr = *exprs.get(a);
 
 				if ((*aexpr).used & (*bexpr).used) == 0 {
 					let mut flags = make(aexpr,bexpr);
@@ -458,11 +468,11 @@ fn main () {
 	}
 	let tasks:u32 = from_str(args[1]).expect("number of tasks is not a number or out of range");
 	let target:uint = from_str(args[2]).expect("target is not a number or out of range");
-	let mut numbers = args.slice(3,args.len()).map(|arg| {
+	let mut numbers: Vec<uint> = args.slice(3,args.len()).iter().map(|arg| {
 		let num:uint = from_str(*arg).expect(format!("argument is not a number or out of range: {}",*arg));
 		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
 		num
-	});
+	}).collect();
 	if tasks == 0 {
 		fail!("number of tasks has to be >= 1");
 	}
@@ -472,11 +482,11 @@ fn main () {
 	numbers.sort();
 
 	println!("target  = {}", target);
-	println!("numbers = [{}]", numbers.map(|num| num.to_str()).connect(", "));
+	println!("numbers = {}", numbers);
 
 	println!("solutions:");
 	let mut i = 1;
-	solutions(tasks, target, numbers, |expr| {
+	solutions(tasks, target, ~numbers, |expr| {
 		println!("{:3d}: {}", i, expr);
 		i += 1;
 	});
