@@ -130,18 +130,18 @@ macro_rules! fmt_expr(
 
 		if p > lp {
 			if p > rp {
-				write!($f.buf, "({}) {} ({})", $left, $op, $right)
+				write!($f, "({}) {} ({})", $left, $op, $right)
 			}
 			else {
-				write!($f.buf, "({}) {} {}", $left, $op, $right)
+				write!($f, "({}) {} {}", $left, $op, $right)
 			}
 		}
 		else {
 			if p > rp {
-				write!($f.buf, "{} {} ({})", $left, $op, $right)
+				write!($f, "{} {} ({})", $left, $op, $right)
 			}
 			else {
-				write!($f.buf, "{} {} {}", $left, $op, $right)
+				write!($f, "{} {} {}", $left, $op, $right)
 			}
 		}
 	})
@@ -163,7 +163,7 @@ impl Show for Expr {
 				fmt_expr!(f, self, '/', *left, *right)
 			},
 			Val(_) => {
-				write!(f.buf, "{}", self.value)
+				write!(f, "{}", self.value)
 			}
 		}
 	}
@@ -378,12 +378,12 @@ fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) 
 		let (chan, port) = channel();
 
 		while lower < upper {
-			let mut workers = 0;
+			let mut workers = 0u;
 			let mut new_exprs = Vec::new();
 			let x0 = lower;
 			let xn = upper;
 			let mut x_last = x0;
-			let mut i = 1;
+			let mut i = 1u;
 			let x0_sq = x0*x0;
 			let area = (xn*xn - x0_sq) as f64 / tasks as f64;
 
@@ -414,8 +414,8 @@ fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) 
 						Some((flags, aexpr, bexpr)) => {
 							solver.make(flags, aexpr, bexpr, |expr| {
 								if (*expr).value == target {
-									if !uniq_solutions.contains(& &*expr) {
-										uniq_solutions.insert(&*expr);
+									// XXX: why can't I insert & &*expr or *expr?
+									if uniq_solutions.insert((*expr).to_string()) {
 										f(&*expr);
 									}
 								}
@@ -466,10 +466,10 @@ fn main () {
 	if args.len() < 4 {
 		fail!("not enough arguments");
 	}
-	let tasks:u32 = from_str(args[1]).expect("number of tasks is not a number or out of range");
-	let target:uint = from_str(args[2]).expect("target is not a number or out of range");
+	let tasks:u32 = from_str(args.get(1).as_slice()).expect("number of tasks is not a number or out of range");
+	let target:uint = from_str(args.get(2).as_slice()).expect("target is not a number or out of range");
 	let mut numbers: Vec<uint> = args.slice(3,args.len()).iter().map(|arg| {
-		let num:uint = from_str(*arg).expect(format!("argument is not a number or out of range: {}",*arg));
+		let num:uint = from_str((*arg).as_slice()).expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
 		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
 		num
 	}).collect();
@@ -485,9 +485,9 @@ fn main () {
 	println!("numbers = {}", numbers);
 
 	println!("solutions:");
-	let mut i = 1;
+	let mut i = 1u;
 	solutions(tasks, target, box numbers, |expr| {
-		println!("{:3d}: {}", i, expr);
+		println!("{:3u}: {}", i, expr);
 		i += 1;
 	});
 }
