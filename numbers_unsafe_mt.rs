@@ -4,13 +4,13 @@
 extern crate collections;
 
 use std::os;
-use std::io::Writer;
 use std::hash::Hash;
 use std::comm::{channel, Sender};
 use std::uint;
 use std::fmt::{Show, Formatter};
 
 use std::collections::hashmap::HashSet;
+use std::hash::Writer;
 
 static HAS_ROOM: uint = 1 << 0;
 static ADD_A_B:  uint = 1 << 1;
@@ -52,42 +52,33 @@ impl Expr {
 	}
 }
 
-macro_rules! tryio(
-	($res:expr) => (
-		match $res {
-			Ok(_) => {},
-			Err(msg) => fail!(msg)
-		}
-	);
-)
-
 impl<S: Writer> Hash<S> for Expr {
 	#[inline]
 	fn hash(&self, state: &mut S) {
 		match self.op {
 			Add(left, right) => unsafe {
-				tryio!(state.write_u8('+' as u8));
+				state.write(['+' as u8]);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Sub(left, right) => unsafe {
-				tryio!(state.write_u8('-' as u8));
+				state.write(['-' as u8]);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Mul(left, right) => unsafe {
-				tryio!(state.write_u8('*' as u8));
+				state.write(['*' as u8]);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Div(left, right) => unsafe {
-				tryio!(state.write_u8('/' as u8));
+				state.write(['/' as u8]);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Val(_) => {
-				tryio!(state.write_u8('#' as u8));
-				tryio!(state.write_uint(self.value));
+				state.write(['#' as u8]);
+				state.write(unsafe { std::mem::transmute::<uint,[u8, ..uint::BYTES]>(self.value) });
 			}
 		}
 	}
@@ -414,8 +405,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) 
 						Some((flags, aexpr, bexpr)) => {
 							solver.make(flags, aexpr, bexpr, |expr| {
 								if (*expr).value == target {
-									// XXX: why can't I insert & &*expr or *expr?
-									if uniq_solutions.insert((*expr).to_string()) {
+									if uniq_solutions.insert(&*expr) {
 										f(&*expr);
 									}
 								}
