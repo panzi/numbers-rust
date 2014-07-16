@@ -10,7 +10,7 @@ use std::comm::{channel, Sender};
 use std::uint;
 use std::fmt::{Show, Formatter};
 
-use collections::HashSet;
+use std::collections::hashmap::HashSet;
 
 static HAS_ROOM: uint = 1 << 0;
 static ADD_A_B:  uint = 1 << 1;
@@ -23,10 +23,10 @@ static DIV_A_B:  uint = 1 << 7;
 static DIV_B_A:  uint = 1 << 8;
 
 enum Op {
-	Add(*Expr,*Expr),
-	Sub(*Expr,*Expr),
-	Mul(*Expr,*Expr),
-	Div(*Expr,*Expr),
+	Add(*const Expr,*const Expr),
+	Sub(*const Expr,*const Expr),
+	Mul(*const Expr,*const Expr),
+	Div(*const Expr,*const Expr),
 	Val(uint)
 }
 
@@ -37,7 +37,7 @@ struct Expr {
 }
 
 struct Solver {
-	exprs: ~Vec<~Expr>
+	exprs: Box<Vec<Box<Expr>>>
 }
 
 impl Expr {
@@ -93,7 +93,7 @@ impl<S: Writer> Hash<S> for Expr {
 	}
 }
 
-impl Eq for Expr {
+impl PartialEq for Expr {
 	fn eq(&self, other: &Expr) -> bool {
 		match self.op {
 			Add(left, right) => match other.op {
@@ -120,7 +120,7 @@ impl Eq for Expr {
 	}
 }
 
-impl TotalEq for Expr {}
+impl Eq for Expr {}
 
 macro_rules! fmt_expr(
 	($f:expr, $expr:expr, $op:expr, $left:expr, $right:expr) => ({
@@ -172,51 +172,51 @@ impl Show for Expr {
 impl Solver {
 	#[inline]
 	fn new() -> Solver {
-		Solver { exprs: ~Vec::new() }
+		Solver { exprs: box Vec::new() }
 	}
 
 	#[inline]
-	fn expr(&mut self, op: Op, value: uint, used: u64) -> *Expr {
-		let expr = ~Expr { op: op, value: value, used: used };
-		let ptr: *Expr = &*expr;
+	fn expr(&mut self, op: Op, value: uint, used: u64) -> *const Expr {
+		let expr = box Expr { op: op, value: value, used: used };
+		let ptr: *const Expr = &*expr;
 		self.exprs.push(expr);
 		return ptr;
 	}
 
 	#[inline]
-	fn val(&mut self, value: uint, index: uint) -> *Expr {
+	fn val(&mut self, value: uint, index: uint) -> *const Expr {
 		self.expr(Val(index), value, 1u64 << index)
 	}
 
 	#[inline]
-	unsafe fn add(&mut self, left: *Expr, right: *Expr) -> *Expr {
+	unsafe fn add(&mut self, left: *const Expr, right: *const Expr) -> *const Expr {
 		let used = (*left).used | (*right).used;
 		let value = (*left).value + (*right).value;
 		self.expr(Add(left, right), value, used)
 	}
 
 	#[inline]
-	unsafe fn sub(&mut self, left: *Expr, right: *Expr) -> *Expr {
+	unsafe fn sub(&mut self, left: *const Expr, right: *const Expr) -> *const Expr {
 		let used = (*left).used | (*right).used;
 		let value = (*left).value - (*right).value;
 		self.expr(Sub(left, right), value, used)
 	}
 
 	#[inline]
-	unsafe fn mul(&mut self, left: *Expr, right: *Expr) -> *Expr {
+	unsafe fn mul(&mut self, left: *const Expr, right: *const Expr) -> *const Expr {
 		let used = (*left).used | (*right).used;
 		let value = (*left).value * (*right).value;
 		self.expr(Mul(left, right), value, used)
 	}
 
 	#[inline]
-	unsafe fn div(&mut self, left: *Expr, right: *Expr) -> *Expr {
+	unsafe fn div(&mut self, left: *const Expr, right: *const Expr) -> *const Expr {
 		let used = (*left).used | (*right).used;
 		let value = (*left).value / (*right).value;
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make(&mut self, what: uint, a: *Expr, b: *Expr, f: |*Expr|) {
+	unsafe fn make(&mut self, what: uint, a: *const Expr, b: *const Expr, f: |*const Expr|) {
 		if (what & ADD_A_B) != 0 {
 			f(self.add(a,b));
 		}
@@ -247,7 +247,7 @@ impl Solver {
 	}
 }
 
-unsafe fn make(a: *Expr, b: *Expr) -> uint {
+unsafe fn make(a: *const Expr, b: *const Expr) -> uint {
 	let mut what = 0;
 
 	if is_normalized_add(a,b) {
@@ -296,7 +296,7 @@ unsafe fn make(a: *Expr, b: *Expr) -> uint {
 	return what;
 }
 
-unsafe fn is_normalized_add(left: *Expr, right: *Expr) -> bool {
+unsafe fn is_normalized_add(left: *const Expr, right: *const Expr) -> bool {
 	match (*right).op {
 		Add(_,_) | Sub(_,_) => return false,
 		_ => {
@@ -309,7 +309,7 @@ unsafe fn is_normalized_add(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-unsafe fn is_normalized_sub(left: *Expr, right: *Expr) -> bool {
+unsafe fn is_normalized_sub(left: *const Expr, right: *const Expr) -> bool {
 	match (*right).op {
 		Add(_,_) | Sub(_,_) => return false,
 		_ => {
@@ -321,7 +321,7 @@ unsafe fn is_normalized_sub(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-unsafe fn is_normalized_mul(left: *Expr, right: *Expr) -> bool {
+unsafe fn is_normalized_mul(left: *const Expr, right: *const Expr) -> bool {
 	match (*right).op {
 		Mul(_,_) | Div(_,_) => return false,
 		_ => {
@@ -334,7 +334,7 @@ unsafe fn is_normalized_mul(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
+unsafe fn is_normalized_div(left: *const Expr, right: *const Expr) -> bool {
 	match (*right).op {
 		Mul(_,_) | Div(_,_) => return false,
 		_ => {
@@ -346,15 +346,15 @@ unsafe fn is_normalized_div(left: *Expr, right: *Expr) -> bool {
 	}
 }
 
-fn solutions(tasks: u32, target: uint, mut numbers: ~Vec<uint>, f: |&Expr|) {
+fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) {
 	struct Helper {
-		exprs: ~Vec<*Expr>
+		exprs: Box<Vec<*const Expr>>
 	}
 
 	let numcnt = numbers.len();
 	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
-	let mut h = Helper { exprs: ~Vec::new() };
+	let mut h = Helper { exprs: box Vec::new() };
 	let mut uniq_solutions = HashSet::new();
 	numbers.sort();
 
@@ -362,7 +362,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~Vec<uint>, f: |&Expr|) {
 		for (i, numref) in numbers.iter().enumerate() {
 			let num = *numref;
 			let expr = solver.val(num,i);
-			let ptr: *Expr = &*expr;
+			let ptr: *const Expr = &*expr;
 			h.exprs.push(ptr);
 		}
 
@@ -388,7 +388,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~Vec<uint>, f: |&Expr|) {
 			let area = (xn*xn - x0_sq) as f64 / tasks as f64;
 
 			{
-				let unsafe_h: *Helper = &h;
+				let unsafe_h: *const Helper = &h;
 
 				while x_last < xn || workers == 0 {
 					let xi = (i as f64 * area + x0_sq as f64).sqrt().round() as uint;
@@ -438,7 +438,7 @@ fn solutions(tasks: u32, target: uint, mut numbers: ~Vec<uint>, f: |&Expr|) {
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &Vec<*Expr>, full_usage: u64, chan: &Sender<Option<(uint,*Expr,*Expr)>>) {
+fn work (lower: uint, upper: uint, exprs: &Vec<*const Expr>, full_usage: u64, chan: &Sender<Option<(uint,*const Expr,*const Expr)>>) {
 	for b in range(lower,upper) {
 		let bexpr = *exprs.get(b);
 
@@ -486,7 +486,7 @@ fn main () {
 
 	println!("solutions:");
 	let mut i = 1;
-	solutions(tasks, target, ~numbers, |expr| {
+	solutions(tasks, target, box numbers, |expr| {
 		println!("{:3d}: {}", i, expr);
 		i += 1;
 	});
