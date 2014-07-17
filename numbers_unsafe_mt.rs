@@ -337,7 +337,7 @@ unsafe fn is_normalized_div(left: *const Expr, right: *const Expr) -> bool {
 	}
 }
 
-fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) {
+fn solutions(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f: |&Expr|) {
 	struct Helper {
 		exprs: Box<Vec<*const Expr>>
 	}
@@ -347,7 +347,6 @@ fn solutions(tasks: u32, target: uint, mut numbers: Box<Vec<uint>>, f: |&Expr|) 
 	let mut solver = Solver::new();
 	let mut h = Helper { exprs: box Vec::new() };
 	let mut uniq_solutions = HashSet::new();
-	numbers.sort();
 
 	unsafe {
 		for (i, numref) in numbers.iter().enumerate() {
