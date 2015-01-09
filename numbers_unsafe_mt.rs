@@ -1,26 +1,18 @@
-#![feature(macro_rules)]
-#![feature(default_type_params)]
+#![feature(box_syntax)]
 
 extern crate collections;
 
 use std::os;
 use std::hash::Hash;
-use std::comm::{channel, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::uint;
 use std::fmt::{Show, Formatter};
+use std::thread::Thread;
 
-use std::collections::hashmap::HashSet;
+use std::collections::HashSet;
 use std::hash::Writer;
 
-static HAS_ROOM: uint = 1 << 0;
-static ADD_A_B:  uint = 1 << 1;
-static ADD_B_A:  uint = 1 << 2;
-static SUB_A_B:  uint = 1 << 3;
-static SUB_B_A:  uint = 1 << 4;
-static MUL_A_B:  uint = 1 << 5;
-static MUL_B_A:  uint = 1 << 6;
-static DIV_A_B:  uint = 1 << 7;
-static DIV_B_A:  uint = 1 << 8;
+use self::Op::*;
 
 enum Op {
 	Add(*const Expr,*const Expr),
@@ -39,6 +31,16 @@ struct Expr {
 struct Solver {
 	exprs: Box<Vec<Box<Expr>>>
 }
+
+static HAS_ROOM: uint = 1 << 0;
+static ADD_A_B:  uint = 1 << 1;
+static ADD_B_A:  uint = 1 << 2;
+static SUB_A_B:  uint = 1 << 3;
+static SUB_B_A:  uint = 1 << 4;
+static MUL_A_B:  uint = 1 << 5;
+static MUL_B_A:  uint = 1 << 6;
+static DIV_A_B:  uint = 1 << 7;
+static DIV_B_A:  uint = 1 << 8;
 
 impl Expr {
 	fn precedence(&self) -> uint {
@@ -78,7 +80,7 @@ impl<S: Writer> Hash<S> for Expr {
 			},
 			Val(_) => {
 				state.write(['#' as u8]);
-				state.write(unsafe { std::mem::transmute::<uint,[u8, ..uint::BYTES]>(self.value) });
+				state.write(unsafe { std::mem::transmute::<uint,[u8; ..uint::BYTES]>(self.value) });
 			}
 		}
 	}
@@ -113,7 +115,7 @@ impl PartialEq for Expr {
 
 impl Eq for Expr {}
 
-macro_rules! fmt_expr(
+macro_rules! fmt_expr {
 	($f:expr, $expr:expr, $op:expr, $left:expr, $right:expr) => ({
 		let p = $expr.precedence();
 		let lp = ($left).precedence();
@@ -136,7 +138,7 @@ macro_rules! fmt_expr(
 			}
 		}
 	})
-)
+}
 
 impl Show for Expr {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -207,7 +209,7 @@ impl Solver {
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make(&mut self, what: uint, a: *const Expr, b: *const Expr, f: |*const Expr|) {
+	unsafe fn make<F: Fn(*const Expr)>(&mut self, what: uint, a: *const Expr, b: *const Expr, f: F) {
 		if (what & ADD_A_B) != 0 {
 			f(self.add(a,b));
 		}
@@ -337,7 +339,7 @@ unsafe fn is_normalized_div(left: *const Expr, right: *const Expr) -> bool {
 	}
 }
 
-fn solutions(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f: |&Expr|) {
+fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f: F) {
 	struct Helper {
 		exprs: Box<Vec<*const Expr>>
 	}
@@ -388,7 +390,7 @@ fn solutions(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f: |&Expr|) {
 						let xim1 = x_last;
 						let chan_clone = chan.clone();
 
-						spawn(proc() work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone));
+						Thread::spawn(move || work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone));
 
 						x_last = xi;
 						workers += 1;
@@ -453,20 +455,20 @@ fn work (lower: uint, upper: uint, exprs: &Vec<*const Expr>, full_usage: u64, ch
 fn main () {
 	let args = os::args();
 	if args.len() < 4 {
-		fail!("not enough arguments");
+		panic!("not enough arguments");
 	}
-	let tasks:u32 = from_str(args.get(1).as_slice()).expect("number of tasks is not a number or out of range");
-	let target:uint = from_str(args.get(2).as_slice()).expect("target is not a number or out of range");
+	let tasks:u32 = args.get(1).as_slice().parse().expect("number of tasks is not a number or out of range");
+	let target:uint = args.get(2).as_slice().parse().expect("target is not a number or out of range");
 	let mut numbers: Vec<uint> = args.slice(3,args.len()).iter().map(|arg| {
-		let num:uint = from_str((*arg).as_slice()).expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
-		if num == 0 { fail!(format!("illegal argument value: {}",*arg)); }
+		let num:uint = (*arg).as_slice().parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
+		if num == 0 { panic!(format!("illegal argument value: {}",*arg)); }
 		num
 	}).collect();
 	if tasks == 0 {
-		fail!("number of tasks has to be >= 1");
+		panic!("number of tasks has to be >= 1");
 	}
 	if numbers.len() > uint::BITS {
-		fail!("only up to {} numbers supported", uint::BITS);
+		panic!("only up to {} numbers supported", uint::BITS);
 	}
 	numbers.sort();
 
@@ -476,7 +478,7 @@ fn main () {
 	println!("solutions:");
 	let mut i = 1u;
 	solutions(tasks, target, box numbers, |expr| {
-		println!("{:3u}: {}", i, expr);
+		println!("{:3}: {}", i, expr);
 		i += 1;
 	});
 }
