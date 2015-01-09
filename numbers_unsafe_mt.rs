@@ -1,6 +1,7 @@
 #![feature(box_syntax)]
 
 extern crate collections;
+extern crate core;
 
 use std::os;
 use std::hash::Hash;
@@ -8,11 +9,23 @@ use std::sync::mpsc::{channel, Sender};
 use std::uint;
 use std::fmt::{Show, Formatter};
 use std::thread::Thread;
+use core::fmt::String;
+use std::num::Float;
 
 use std::collections::HashSet;
-use std::hash::Writer;
+use std::hash::{Writer, Hasher};
 
 use self::Op::*;
+
+static HAS_ROOM: uint = 1 << 0;
+static ADD_A_B:  uint = 1 << 1;
+static ADD_B_A:  uint = 1 << 2;
+static SUB_A_B:  uint = 1 << 3;
+static SUB_B_A:  uint = 1 << 4;
+static MUL_A_B:  uint = 1 << 5;
+static MUL_B_A:  uint = 1 << 6;
+static DIV_A_B:  uint = 1 << 7;
+static DIV_B_A:  uint = 1 << 8;
 
 enum Op {
 	Add(*const Expr,*const Expr),
@@ -32,15 +45,7 @@ struct Solver {
 	exprs: Box<Vec<Box<Expr>>>
 }
 
-static HAS_ROOM: uint = 1 << 0;
-static ADD_A_B:  uint = 1 << 1;
-static ADD_B_A:  uint = 1 << 2;
-static SUB_A_B:  uint = 1 << 3;
-static SUB_B_A:  uint = 1 << 4;
-static MUL_A_B:  uint = 1 << 5;
-static MUL_B_A:  uint = 1 << 6;
-static DIV_A_B:  uint = 1 << 7;
-static DIV_B_A:  uint = 1 << 8;
+unsafe impl Send for *const Expr {}
 
 impl Expr {
 	fn precedence(&self) -> uint {
@@ -54,33 +59,33 @@ impl Expr {
 	}
 }
 
-impl<S: Writer> Hash<S> for Expr {
+impl<S: Writer + Hasher> Hash<S> for Expr {
 	#[inline]
 	fn hash(&self, state: &mut S) {
 		match self.op {
 			Add(left, right) => unsafe {
-				state.write(['+' as u8]);
+				('+' as u8).hash(state);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Sub(left, right) => unsafe {
-				state.write(['-' as u8]);
+				('-' as u8).hash(state);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Mul(left, right) => unsafe {
-				state.write(['*' as u8]);
+				('*' as u8).hash(state);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Div(left, right) => unsafe {
-				state.write(['/' as u8]);
+				('/' as u8).hash(state);
 				(*left).hash(state);
 				(*right).hash(state);
 			},
 			Val(_) => {
-				state.write(['#' as u8]);
-				state.write(unsafe { std::mem::transmute::<uint,[u8; ..uint::BYTES]>(self.value) });
+				('#' as u8).hash(state);
+				self.value.hash(state);
 			}
 		}
 	}
@@ -140,8 +145,8 @@ macro_rules! fmt_expr {
 	})
 }
 
-impl Show for Expr {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+impl core::fmt::String for Expr {
+	fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
 		match self.op {
 			Add(left, right) => unsafe {
 				fmt_expr!(f, self, '+', *left, *right)
@@ -344,6 +349,8 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 		exprs: Box<Vec<*const Expr>>
 	}
 
+	unsafe impl Send for *const Helper {}
+
 	let numcnt = numbers.len();
 	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
@@ -390,7 +397,7 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 						let xim1 = x_last;
 						let chan_clone = chan.clone();
 
-						Thread::spawn(move || work(xim1, xi, (*unsafe_h).exprs, full_usage, &chan_clone));
+						Thread::spawn(move || work(xim1, xi, &*(*unsafe_h).exprs, full_usage, &chan_clone));
 
 						x_last = xi;
 						workers += 1;
@@ -400,7 +407,7 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 				}
 
 				while workers > 0 {
-					let pair = port.recv();
+					let pair = port.recv().unwrap();
 					match pair {
 						None => workers -= 1,
 						Some((flags, aexpr, bexpr)) => {
@@ -431,11 +438,11 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 
 fn work (lower: uint, upper: uint, exprs: &Vec<*const Expr>, full_usage: u64, chan: &Sender<Option<(uint,*const Expr,*const Expr)>>) {
 	for b in range(lower,upper) {
-		let bexpr = *exprs.get(b);
+		let bexpr = *exprs.get(b).unwrap();
 
 		for a in range(0,b) {
 			unsafe {
-				let aexpr = *exprs.get(a);
+				let aexpr = *exprs.get(a).unwrap();
 
 				if ((*aexpr).used & (*bexpr).used) == 0 {
 					let mut flags = make(aexpr,bexpr);
@@ -457,10 +464,10 @@ fn main () {
 	if args.len() < 4 {
 		panic!("not enough arguments");
 	}
-	let tasks:u32 = args.get(1).as_slice().parse().expect("number of tasks is not a number or out of range");
-	let target:uint = args.get(2).as_slice().parse().expect("target is not a number or out of range");
+	let tasks:u32 = args.get(1).unwrap().parse().expect("number of tasks is not a number or out of range");
+	let target:uint = args.get(2).unwrap().parse().expect("target is not a number or out of range");
 	let mut numbers: Vec<uint> = args.slice(3,args.len()).iter().map(|arg| {
-		let num:uint = (*arg).as_slice().parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
+		let num:uint = (*arg).parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
 		if num == 0 { panic!(format!("illegal argument value: {}",*arg)); }
 		num
 	}).collect();
@@ -473,7 +480,7 @@ fn main () {
 	numbers.sort();
 
 	println!("target  = {}", target);
-	println!("numbers = {}", numbers);
+	println!("numbers = {}", numbers.iter().map(|v| { v.to_string() }).collect::<Vec<_>>().connect(", "));
 
 	println!("solutions:");
 	let mut i = 1u;
