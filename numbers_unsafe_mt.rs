@@ -6,8 +6,8 @@ extern crate core;
 use std::os;
 use std::hash::Hash;
 use std::sync::mpsc::{channel, Sender};
-use std::uint;
-use std::fmt::{Show, Formatter};
+use std::usize;
+use std::fmt::Formatter;
 use std::thread::Thread;
 use core::fmt::String;
 use std::num::Float;
@@ -17,27 +17,27 @@ use std::hash::{Writer, Hasher};
 
 use self::Op::*;
 
-static HAS_ROOM: uint = 1 << 0;
-static ADD_A_B:  uint = 1 << 1;
-static ADD_B_A:  uint = 1 << 2;
-static SUB_A_B:  uint = 1 << 3;
-static SUB_B_A:  uint = 1 << 4;
-static MUL_A_B:  uint = 1 << 5;
-static MUL_B_A:  uint = 1 << 6;
-static DIV_A_B:  uint = 1 << 7;
-static DIV_B_A:  uint = 1 << 8;
+static HAS_ROOM: usize = 1 << 0;
+static ADD_A_B:  usize = 1 << 1;
+static ADD_B_A:  usize = 1 << 2;
+static SUB_A_B:  usize = 1 << 3;
+static SUB_B_A:  usize = 1 << 4;
+static MUL_A_B:  usize = 1 << 5;
+static MUL_B_A:  usize = 1 << 6;
+static DIV_A_B:  usize = 1 << 7;
+static DIV_B_A:  usize = 1 << 8;
 
 enum Op {
 	Add(*const Expr,*const Expr),
 	Sub(*const Expr,*const Expr),
 	Mul(*const Expr,*const Expr),
 	Div(*const Expr,*const Expr),
-	Val(uint)
+	Val(usize)
 }
 
 struct Expr {
 	op: Op,
-	value: uint,
+	value: usize,
 	used: u64
 }
 
@@ -48,7 +48,7 @@ struct Solver {
 unsafe impl Send for *const Expr {}
 
 impl Expr {
-	fn precedence(&self) -> uint {
+	fn precedence(&self) -> usize {
 		match self.op {
 			Add(_,_) => 0,
 			Sub(_,_) => 1,
@@ -174,7 +174,7 @@ impl Solver {
 	}
 
 	#[inline]
-	fn expr(&mut self, op: Op, value: uint, used: u64) -> *const Expr {
+	fn expr(&mut self, op: Op, value: usize, used: u64) -> *const Expr {
 		let expr = box Expr { op: op, value: value, used: used };
 		let ptr: *const Expr = &*expr;
 		self.exprs.push(expr);
@@ -182,7 +182,7 @@ impl Solver {
 	}
 
 	#[inline]
-	fn val(&mut self, value: uint, index: uint) -> *const Expr {
+	fn val(&mut self, value: usize, index: usize) -> *const Expr {
 		self.expr(Val(index), value, 1u64 << index)
 	}
 
@@ -214,7 +214,7 @@ impl Solver {
 		self.expr(Div(left, right), value, used)
 	}
 	
-	unsafe fn make<F: Fn(*const Expr)>(&mut self, what: uint, a: *const Expr, b: *const Expr, f: F) {
+	unsafe fn make<F: FnMut(*const Expr)>(&mut self, what: usize, a: *const Expr, b: *const Expr, mut f: F) {
 		if (what & ADD_A_B) != 0 {
 			f(self.add(a,b));
 		}
@@ -245,7 +245,7 @@ impl Solver {
 	}
 }
 
-unsafe fn make(a: *const Expr, b: *const Expr) -> uint {
+unsafe fn make(a: *const Expr, b: *const Expr) -> usize {
 	let mut what = 0;
 
 	if is_normalized_add(a,b) {
@@ -344,7 +344,7 @@ unsafe fn is_normalized_div(left: *const Expr, right: *const Expr) -> bool {
 	}
 }
 
-fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f: F) {
+fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>>, mut f: F) {
 	struct Helper {
 		exprs: Box<Vec<*const Expr>>
 	}
@@ -377,12 +377,12 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 		let (chan, port) = channel();
 
 		while lower < upper {
-			let mut workers = 0u;
+			let mut workers = 0us;
 			let mut new_exprs = Vec::new();
 			let x0 = lower;
 			let xn = upper;
 			let mut x_last = x0;
-			let mut i = 1u;
+			let mut i = 1us;
 			let x0_sq = x0*x0;
 			let area = (xn*xn - x0_sq) as f64 / tasks as f64;
 
@@ -390,7 +390,7 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 				let unsafe_h: *const Helper = &h;
 
 				while x_last < xn || workers == 0 {
-					let xi = (i as f64 * area + x0_sq as f64).sqrt().round() as uint;
+					let xi = (i as f64 * area + x0_sq as f64).sqrt().round() as usize;
 					let xi = if xi > xn { xn } else { xi };
 
 					if xi > x_last {
@@ -411,7 +411,7 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 					match pair {
 						None => workers -= 1,
 						Some((flags, aexpr, bexpr)) => {
-							solver.make(flags, aexpr, bexpr, |expr| {
+							solver.make(flags, aexpr, bexpr, |&mut: expr| {
 								if (*expr).value == target {
 									if uniq_solutions.insert(&*expr) {
 										f(&*expr);
@@ -436,7 +436,7 @@ fn solutions<F: Fn(&Expr)>(tasks: u32, target: uint, numbers: Box<Vec<uint>>, f:
 	}
 }
 
-fn work (lower: uint, upper: uint, exprs: &Vec<*const Expr>, full_usage: u64, chan: &Sender<Option<(uint,*const Expr,*const Expr)>>) {
+fn work (lower: usize, upper: usize, exprs: &Vec<*const Expr>, full_usage: u64, chan: &Sender<Option<(usize,*const Expr,*const Expr)>>) {
 	for b in range(lower,upper) {
 		let bexpr = *exprs.get(b).unwrap();
 
@@ -465,17 +465,17 @@ fn main () {
 		panic!("not enough arguments");
 	}
 	let tasks:u32 = args.get(1).unwrap().parse().expect("number of tasks is not a number or out of range");
-	let target:uint = args.get(2).unwrap().parse().expect("target is not a number or out of range");
-	let mut numbers: Vec<uint> = args.slice(3,args.len()).iter().map(|arg| {
-		let num:uint = (*arg).parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
+	let target:usize = args.get(2).unwrap().parse().expect("target is not a number or out of range");
+	let mut numbers: Vec<usize> = args.slice(3,args.len()).iter().map(|arg| {
+		let num:usize = (*arg).parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
 		if num == 0 { panic!(format!("illegal argument value: {}",*arg)); }
 		num
 	}).collect();
 	if tasks == 0 {
 		panic!("number of tasks has to be >= 1");
 	}
-	if numbers.len() > uint::BITS {
-		panic!("only up to {} numbers supported", uint::BITS);
+	if numbers.len() > usize::BITS {
+		panic!("only up to {} numbers supported", usize::BITS);
 	}
 	numbers.sort();
 
@@ -483,8 +483,8 @@ fn main () {
 	println!("numbers = {}", numbers.iter().map(|v| { v.to_string() }).collect::<Vec<_>>().connect(", "));
 
 	println!("solutions:");
-	let mut i = 1u;
-	solutions(tasks, target, box numbers, |expr| {
+	let mut i = 1us;
+	solutions(tasks, target, box numbers, |&mut: expr| {
 		println!("{:3}: {}", i, expr);
 		i += 1;
 	});
