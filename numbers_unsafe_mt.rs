@@ -1,19 +1,52 @@
 #![feature(box_syntax)]
+#![feature(hash)]
 
 extern crate collections;
 extern crate core;
 
 use std::os;
-use std::hash::Hash;
 use std::sync::mpsc::{channel, Sender};
 use std::usize;
 use std::fmt::Formatter;
 use std::thread::Thread;
-use core::fmt::String;
+use std::fmt::Display;
 use std::num::Float;
 
 use std::collections::HashSet;
-use std::hash::{Writer, Hasher};
+use std::hash::{Hash, Hasher};
+
+// more or less copy of std::ptr::Unique that uses *const
+use std::marker::{Send, Sized, Sync};
+use std::ops::Deref;
+use core::nonzero::NonZero;
+
+struct Shared<T: ?Sized> {
+    pointer: NonZero<*const T>
+}
+
+unsafe impl<T: Send + ?Sized> Send for Shared<T> { }
+unsafe impl<T: Sync + ?Sized> Sync for Shared<T> { }
+
+impl<T: ?Sized> Shared<T> {
+    /// Create a new `Shared`.
+    pub unsafe fn new(ptr: *const T) -> Shared<T> {
+        Shared { pointer: NonZero::new(ptr as *const T) }
+    }
+
+    /// Dereference the content.
+    pub unsafe fn get(&self) -> &T {
+        &**self.pointer
+    }
+}
+
+impl<T:?Sized> Deref for Shared<T> {
+    type Target = *const T;
+
+    #[inline]
+    fn deref<'a>(&'a self) -> &'a *const T {
+        unsafe { std::mem::transmute(&*self.pointer) }
+    }
+}
 
 use self::Op::*;
 
@@ -41,11 +74,11 @@ struct Expr {
 	used: u64
 }
 
+unsafe impl Send for Expr { }
+
 struct Solver {
 	exprs: Box<Vec<Box<Expr>>>
 }
-
-unsafe impl Send for *const Expr {}
 
 impl Expr {
 	fn precedence(&self) -> usize {
@@ -59,9 +92,9 @@ impl Expr {
 	}
 }
 
-impl<S: Writer + Hasher> Hash<S> for Expr {
+impl Hash for Expr {
 	#[inline]
-	fn hash(&self, state: &mut S) {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		match self.op {
 			Add(left, right) => unsafe {
 				('+' as u8).hash(state);
@@ -145,7 +178,7 @@ macro_rules! fmt_expr {
 	})
 }
 
-impl core::fmt::String for Expr {
+impl std::fmt::Display for Expr {
 	fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
 		match self.op {
 			Add(left, right) => unsafe {
@@ -345,29 +378,22 @@ unsafe fn is_normalized_div(left: *const Expr, right: *const Expr) -> bool {
 }
 
 fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>>, mut f: F) {
-	struct Helper {
-		exprs: Box<Vec<*const Expr>>
-	}
-
-	unsafe impl Send for *const Helper {}
-
+	let mut exprs:Vec<Shared<Expr>> = Vec::new();
 	let numcnt = numbers.len();
 	let full_usage = !(!0u64 << numcnt);
 	let mut solver = Solver::new();
-	let mut h = Helper { exprs: box Vec::new() };
 	let mut uniq_solutions = HashSet::new();
 
 	unsafe {
 		for (i, numref) in numbers.iter().enumerate() {
 			let num = *numref;
 			let expr = solver.val(num,i);
-			let ptr: *const Expr = &*expr;
-			h.exprs.push(ptr);
+			exprs.push(Shared::new(expr));
 		}
 
-		for expr in h.exprs.iter() {
-			if (**expr).value == target {
-				f(&**expr);
+		for expr in exprs.iter() {
+			if (***expr).value == target {
+				f(&***expr);
 				break;
 			}
 		}
@@ -377,18 +403,16 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 		let (chan, port) = channel();
 
 		while lower < upper {
-			let mut workers = 0us;
+			let mut workers = 0usize;
 			let mut new_exprs = Vec::new();
 			let x0 = lower;
 			let xn = upper;
 			let mut x_last = x0;
-			let mut i = 1us;
+			let mut i = 1usize;
 			let x0_sq = x0*x0;
 			let area = (xn*xn - x0_sq) as f64 / tasks as f64;
 
 			{
-				let unsafe_h: *const Helper = &h;
-
 				while x_last < xn || workers == 0 {
 					let xi = (i as f64 * area + x0_sq as f64).sqrt().round() as usize;
 					let xi = if xi > xn { xn } else { xi };
@@ -396,8 +420,9 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 					if xi > x_last {
 						let xim1 = x_last;
 						let chan_clone = chan.clone();
+						let exprs_ptr = Shared::new(&exprs);
 
-						Thread::spawn(move || work(xim1, xi, &*(*unsafe_h).exprs, full_usage, &chan_clone));
+						Thread::spawn(move || work(xim1, xi, &**exprs_ptr, full_usage, &chan_clone));
 
 						x_last = xi;
 						workers += 1;
@@ -411,7 +436,7 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 					match pair {
 						None => workers -= 1,
 						Some((flags, aexpr, bexpr)) => {
-							solver.make(flags, aexpr, bexpr, |&mut: expr| {
+							solver.make(flags, *aexpr, *bexpr, |expr| {
 								if (*expr).value == target {
 									if uniq_solutions.insert(&*expr) {
 										f(&*expr);
@@ -427,22 +452,22 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 			}
 
 			for expr in new_exprs.iter() {
-				h.exprs.push(*expr);
+				exprs.push(Shared::new(*expr));
 			}
 
 			lower = upper;
-			upper = h.exprs.len();
+			upper = exprs.len();
 		}
 	}
 }
 
-fn work (lower: usize, upper: usize, exprs: &Vec<*const Expr>, full_usage: u64, chan: &Sender<Option<(usize,*const Expr,*const Expr)>>) {
+fn work(lower: usize, upper: usize, exprs: &Vec<Shared<Expr>>, full_usage: u64, chan: &Sender<Option<(usize,Shared<Expr>,Shared<Expr>)>>) {
 	for b in range(lower,upper) {
-		let bexpr = *exprs.get(b).unwrap();
+		let bexpr = **exprs.get(b).unwrap();
 
 		for a in range(0,b) {
 			unsafe {
-				let aexpr = *exprs.get(a).unwrap();
+				let aexpr = **exprs.get(a).unwrap();
 
 				if ((*aexpr).used & (*bexpr).used) == 0 {
 					let mut flags = make(aexpr,bexpr);
@@ -450,7 +475,7 @@ fn work (lower: usize, upper: usize, exprs: &Vec<*const Expr>, full_usage: u64, 
 						if ((*aexpr).used | (*bexpr).used) != full_usage {
 							flags |= HAS_ROOM;
 						}
-						chan.send(Some((flags, aexpr, bexpr)));
+						chan.send(Some((flags, Shared::new(aexpr), Shared::new(bexpr))));
 					}
 				}
 			}
@@ -459,15 +484,15 @@ fn work (lower: usize, upper: usize, exprs: &Vec<*const Expr>, full_usage: u64, 
 	chan.send(None);
 }
 
-fn main () {
+fn main() {
 	let args = os::args();
 	if args.len() < 4 {
 		panic!("not enough arguments");
 	}
-	let tasks:u32 = args.get(1).unwrap().parse().expect("number of tasks is not a number or out of range");
-	let target:usize = args.get(2).unwrap().parse().expect("target is not a number or out of range");
+	let tasks:u32 = args.get(1).unwrap().parse().ok().expect("number of tasks is not a number or out of range");
+	let target:usize = args.get(2).unwrap().parse().ok().expect("target is not a number or out of range");
 	let mut numbers: Vec<usize> = args.slice(3,args.len()).iter().map(|arg| {
-		let num:usize = (*arg).parse().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
+		let num:usize = (*arg).parse().ok().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
 		if num == 0 { panic!(format!("illegal argument value: {}",*arg)); }
 		num
 	}).collect();
@@ -483,8 +508,8 @@ fn main () {
 	println!("numbers = {}", numbers.iter().map(|v| { v.to_string() }).collect::<Vec<_>>().connect(", "));
 
 	println!("solutions:");
-	let mut i = 1us;
-	solutions(tasks, target, box numbers, |&mut: expr| {
+	let mut i = 1usize;
+	solutions(tasks, target, box numbers, |expr| {
 		println!("{:3}: {}", i, expr);
 		i += 1;
 	});
