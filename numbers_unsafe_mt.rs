@@ -1,19 +1,20 @@
 #![feature(box_syntax)]
-#![feature(hash)]
+#![feature(core)]
+#![feature(collections)]
+#![feature(env)]
 
 extern crate collections;
 extern crate core;
 
-use std::os;
 use std::sync::mpsc::{channel, Sender};
 use std::usize;
 use std::fmt::Formatter;
-use std::thread::Thread;
 use std::fmt::Display;
 use std::num::Float;
-
+use std::iter::FromIterator;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::thread;
 
 // more or less copy of std::ptr::Unique that uses *const
 use std::marker::{Send, Sized, Sync};
@@ -31,11 +32,6 @@ impl<T: ?Sized> Shared<T> {
     /// Create a new `Shared`.
     pub unsafe fn new(ptr: *const T) -> Shared<T> {
         Shared { pointer: NonZero::new(ptr as *const T) }
-    }
-
-    /// Dereference the content.
-    pub unsafe fn get(&self) -> &T {
-        &**self.pointer
     }
 }
 
@@ -179,7 +175,7 @@ macro_rules! fmt_expr {
 }
 
 impl std::fmt::Display for Expr {
-	fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		match self.op {
 			Add(left, right) => unsafe {
 				fmt_expr!(f, self, '+', *left, *right)
@@ -391,7 +387,7 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 			exprs.push(Shared::new(expr));
 		}
 
-		for expr in exprs.iter() {
+		for expr in &exprs {
 			if (***expr).value == target {
 				f(&***expr);
 				break;
@@ -403,6 +399,7 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 		let (chan, port) = channel();
 
 		while lower < upper {
+			// XXX: there is a bug in the dividing of the problem so sometimes some results are doubled
 			let mut workers = 0usize;
 			let mut new_exprs = Vec::new();
 			let x0 = lower;
@@ -422,7 +419,7 @@ fn solutions<F: FnMut(&Expr)>(tasks: u32, target: usize, numbers: Box<Vec<usize>
 						let chan_clone = chan.clone();
 						let exprs_ptr = Shared::new(&exprs);
 
-						Thread::spawn(move || work(xim1, xi, &**exprs_ptr, full_usage, &chan_clone));
+						thread::spawn(move || work(xim1, xi, &**exprs_ptr, full_usage, &chan_clone));
 
 						x_last = xi;
 						workers += 1;
@@ -475,23 +472,27 @@ fn work(lower: usize, upper: usize, exprs: &Vec<Shared<Expr>>, full_usage: u64, 
 						if ((*aexpr).used | (*bexpr).used) != full_usage {
 							flags |= HAS_ROOM;
 						}
-						chan.send(Some((flags, Shared::new(aexpr), Shared::new(bexpr))));
+						if chan.send(Some((flags, Shared::new(aexpr), Shared::new(bexpr)))).is_err() {
+							panic!("send failed");
+						}
 					}
 				}
 			}
 		}
 	}
-	chan.send(None);
+	if chan.send(None).is_err() {
+		panic!("send failed");
+	}
 }
 
 fn main() {
-	let args = os::args();
+	let args = Vec::from_iter(std::env::args());
 	if args.len() < 4 {
 		panic!("not enough arguments");
 	}
 	let tasks:u32 = args.get(1).unwrap().parse().ok().expect("number of tasks is not a number or out of range");
 	let target:usize = args.get(2).unwrap().parse().ok().expect("target is not a number or out of range");
-	let mut numbers: Vec<usize> = args.slice(3,args.len()).iter().map(|arg| {
+	let mut numbers: Vec<usize> = args[3 .. args.len()].iter().map(|arg| {
 		let num:usize = (*arg).parse().ok().expect(format!("argument is not a number or out of range: {}",*arg).as_slice());
 		if num == 0 { panic!(format!("illegal argument value: {}",*arg)); }
 		num
