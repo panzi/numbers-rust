@@ -73,7 +73,7 @@ struct Expr {
 unsafe impl Send for Expr { }
 
 struct Solver {
-	exprs: Box<Vec<Box<Expr>>>
+	exprs: Vec<Box<Expr>>
 }
 
 impl Expr {
@@ -199,7 +199,7 @@ impl std::fmt::Display for Expr {
 impl Solver {
 	#[inline]
 	fn new() -> Solver {
-		Solver { exprs: box Vec::new() }
+		Solver { exprs: Vec::new() }
 	}
 
 	#[inline]
