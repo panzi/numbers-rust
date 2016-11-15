@@ -1,6 +1,9 @@
 numbers-rust
 ============
 
+**NOTE:** This needs a rewrite. It doesn't compile with current Rust and is
+not very idiomatic.
+
 Countdown numbers game solver written in Rust.
 
 Compile:
@@ -18,5 +21,6 @@ Usage:
 ```
 
 Same program in other languages:
+ * https://github.com/panzi/numbers-c
  * https://github.com/panzi/numbers-python
  * https://github.com/panzi/numbers-js
