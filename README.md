@@ -21,6 +21,9 @@ Usage:
 ```
 
 Same program in other languages:
- * https://github.com/panzi/numbers-c
- * https://github.com/panzi/numbers-python
- * https://github.com/panzi/numbers-js
+* https://github.com/panzi/numbers-c
+* https://github.com/panzi/numbers-python
+* https://github.com/panzi/numbers-js
+
+C program using a much better strategy:
+* https://github.com/panzi/numbers
